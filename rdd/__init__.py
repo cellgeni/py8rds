@@ -2,6 +2,8 @@ import gzip
 import struct
 import logging
 
+__version__ = "0.0.1"
+
 logging.basicConfig(level="DEBUG", format="[%(asctime)s][%(levelname)s] %(message)s")
 
 # REFERENCES:
