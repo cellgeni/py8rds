@@ -5,6 +5,7 @@ import logging
 __version__ = "0.0.1"
 
 logging.basicConfig(level="DEBUG", format="[%(asctime)s][%(levelname)s] %(message)s")
+logging.getLogger().setLevel('INFO')
 
 # REFERENCES:
 # https://cran.r-project.org/doc/manuals/r-release/R-ints.html#Serialization-Formats
@@ -38,7 +39,12 @@ SEXPTYPEs = {
     24: {"SEXPTYPE": "RAWSXP", "description": "reference raw vector"},
     25: {"SEXPTYPE": "S4SXP", "description": "S4 classes"},
     254: {"SEXPTYPE": "NILSXP", "description": "NULL"},
+    255: {"SEXPTYPE": "SEQPOOL", "description": "NULL"}, # it is not official sextype, but in it will make parsing seqpooled symbols smoother
 }
+
+# pairlist names seems to be stored into pool and be referenced on next occurences
+# it should be probably placed into RdsFile or Robj, but they are not passed to parse functions, so I'll keep it on the top level
+SEQPOOL = []
 
 
 class RdsFile:
@@ -52,6 +58,79 @@ class RdsFile:
         self.symbols = []
         self.external_pointers = []
 
+class Robj:
+    def __init__(self):
+        self.value = None
+        # attributes has unique names and then can be stored in dict, but they are serialized as pairlist which names are not necessary unique. 
+        # So we will store attributes as list of [string,Robj] pairs
+        self.attributes = []
+    def __str__(self):
+      return self.toString()
+    
+    def __repr__(self):
+      return self.toString()
+    
+    # it is to print Robj in human readable manner
+    def isSimple(self,o):
+      if isinstance(o,list):
+        types = list({type(x) for x in o if x != None})
+      else:
+        return False
+      return (len(types) == 1) and any([types[0] == type(t) for t in ['a',1,1.1,True]]) # ugly but working
+    
+    def toString(self,indent='',withAttr=True,maxItems=5,header='',printBrackets = True,sep='.'):
+      result = ''
+      if printBrackets:
+        result += indent + header +"(\n"
+      result += indent + sep+"value: "
+      # atomic lists, should be always stored as list of same type
+      if self.isSimple(self.value):
+        v = self.value[:min(maxItems,len(self.value))]
+        v = '[' + ','.join([str(x) for x in v]) + (',...]' if len(self.value) > maxItems else ']')
+        result += v
+      else:
+        # list, stored as list of Robj or pairlist stored as list of [name,value]
+        if isinstance(self.value,list):
+          if len(self.value)==0:
+            result += '[]'
+          # list
+          elif isinstance(self.value[0],Robj):
+            result += "[\n"
+            for v in self.value:
+              if v != None:
+                result += v.toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,sep=sep) + ",\n"
+              else:
+                result += indent+sep+sep +"(None),\n"
+            result = result[:(len(result)-2)]
+            result += "\n" + indent + sep+"]"
+          # pairlist (including S4)
+          else:
+            result += "{\n"
+            for k in self.value:
+              result += k[1].toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,header=k[0]+":",sep=sep) + ",\n"
+            result = result[:(len(result)-2)]
+            result += "\n" + indent + sep+"}"
+        # nested Robj
+        if isinstance(self.value,Robj):
+          result += "(\n"
+          result += self.value.toString(indent=indent+sep,withAttr=withAttr,maxItems=maxItems,printBrackets=False,sep=sep)
+          result += "\n" + indent + sep+")"
+        
+      if withAttr:
+        result += "\n" + indent + sep+'attrs: {'
+        for k in self.attributes:
+            result += "\n" 
+            if isinstance(k[1],Robj):
+              result += k[1].toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,header=k[0]+":",sep=sep) + ","
+            else:
+              result += indent + sep +sep + k[0] +": " + str(k[1]) + ","
+        if len(self.attributes)>0:
+            result = result[:(len(result)-1)]
+        result += "}"
+      if printBrackets:
+        result += "\n" + indent + ")"
+      return result
+      
 
 def parse_object_header(reader):
     logging.debug(f"---> start of object header (0x{reader.tell():02X})")
@@ -60,7 +139,7 @@ def parse_object_header(reader):
     header_bin = [f"{struct.unpack('>B',b)[0]:08b}" for b in object_header]
     logging.debug(f"header {header_bin}")
 
-    sexp_type = struct.unpack("<b", object_header[3])[0]  # bit 0-7
+    sexp_type = struct.unpack("<B", object_header[3])[0]  # bit 0-7
     if sexp_type in SEXPTYPEs:
         logging.debug(f"SEXPTYPE   {SEXPTYPEs[sexp_type]['SEXPTYPE']} ({sexp_type})")
     else:
@@ -80,10 +159,11 @@ def parse_object_header(reader):
 
     return {
         "bytes": object_header,
+        "sexp_type_code": sexp_type,
         "sexptype": SEXPTYPEs[sexp_type]["SEXPTYPE"] if sexp_type in SEXPTYPEs else -1,
         "flags": {
             "object": object_bit,
-            "attributes": attributes_bit,
+            "attributes": attributes_bit & (sexp_type < 255),  # sexp_type==255 is symbol, symbol has no attributes (I hope), but have sepool index in preceeding bytes
             "tag": tag_bit,
             "gp": gp_bit,
         },
@@ -92,6 +172,9 @@ def parse_object_header(reader):
 
 def parse_rds(file_path: str) -> RdsFile:
     logging.info(f"Reading {file_path}")
+    # clean seqpool before parsing new file
+    global SEQPOOL
+    SEQPOOL = [] 
     rds = RdsFile()
     with open(file_path, "rb") as f:
         magic_number = f.read(2)
@@ -133,93 +216,120 @@ def parse_rds(file_path: str) -> RdsFile:
 
     logging.debug("<--- end of file header")
 
-    x = parse_object(reader)
-
+    rds.object = parse_object(reader)
+    logging.info(f"Done reading {file_path}")
+    return rds
 
 def parse_object(reader):
     header = parse_object_header(reader)
-
-    if header["flags"]["attributes"]:
-        attributes = []
-        while True:
-            attr = parse_object(reader)
-            if attr == None:
-                # NILSXP? re-read the hader befor breaking
-                # so i can be processed and we're not stuck in a loop
-                header = parse_object_header(reader)
-                break
-            attributes.append(attr)
-
+    robj = Robj()
     if header["sexptype"] == "S4SXP":
         logging.debug(f">> S4SXP")
-        return parse_S4SXP(reader)
+        robj.value = parse_S4SXP(reader)
 
-    if header["sexptype"] == "LISTSXP":
+    elif header["sexptype"] == "LISTSXP":
         logging.debug(f">> LISTSXP")
-        return parse_LISTSXP(reader)
+        robj.value = parse_LISTSXP(reader)
 
-    if header["sexptype"] == "LANGSXP":
+    elif header["sexptype"] == "LANGSXP":
         logging.debug(f">> LANGSXP")
-        return parse_LANGSXP(reader)
+        robj.value = parse_LANGSXP(reader)
 
-    if header["sexptype"] == "SYMSXP":
+    elif header["sexptype"] == "SYMSXP":
         logging.debug(f">> SYMSXP expecting CHARSXP after")
-        return parse_SYMSXP(reader)
+        robj.value = parse_SYMSXP(reader)
 
-    if header["sexptype"] == "CHARSXP":
+    elif header["sexptype"] == "CHARSXP":
         logging.debug(f">> CHARSXP")
-        return parse_CHARSXP(reader)
+        robj.value = parse_CHARSXP(reader)
 
-    if header["sexptype"] == "LGLSXP":
+    elif header["sexptype"] == "LGLSXP":
         logging.debug(f">> LGLSXP")
-        return parse_LGLSXP(reader)
+        robj.value = parse_LGLSXP(reader)
 
-    if header["sexptype"] == "STRSXP":
+    elif header["sexptype"] == "STRSXP":
         logging.debug(f">> STRSXP")
-        return parse_STRSXP(reader)
+        robj.value = parse_STRSXP(reader)
 
-    if header["sexptype"] == "REALSXP":
+    elif header["sexptype"] == "REALSXP":
         logging.debug(f">> REALSXP")
-        return parse_REALSXP(reader)
+        robj.value = parse_REALSXP(reader)
 
-    if header["sexptype"] == "INTSXP":
+    elif header["sexptype"] == "INTSXP":
         logging.debug(f">> INTSXP")
-        return parse_INTSXP(reader)
+        robj.value = parse_INTSXP(reader)
 
-    if header["sexptype"] == "BUILTINSXP":
+    elif header["sexptype"] == "BUILTINSXP":
         logging.debug(f">> BUILTINSXP")
-        return parse_BUILTINSXP(reader)
+        robj.value = parse_BUILTINSXP(reader)
 
-    if header["sexptype"] == "VECSXP":
+    elif header["sexptype"] == "VECSXP":
         logging.debug(f">> VECSXP")
-        return parse_VECSXP(reader)
+        robj.value = parse_VECSXP(reader)
 
-    if header["sexptype"] == "CLOSXP":
+    elif header["sexptype"] == "CLOSXP":
         logging.debug(f">> CLOSXP")
-        return parse_CLOSXP(reader)
+        robj.value = parse_CLOSXP(reader)
+    
+    elif header["sexptype"] == "ENVSXP":
+        logging.debug(f">> ENVSXP")
+        robj.value = parse_ENVSXP(reader)
 
-    if header["sexptype"] == "NILSXP":
-        return None
+    elif header["sexptype"] == "NILSXP":
+        robj.value = None
+    # assume it is symbol from seqpool
+    elif header['sexptype'] == 'SEQPOOL':
+        size = struct.unpack(">I",b''.join(header['bytes']))[0]
+        inx = (size+1)//(2**8)-2
+        logging.debug(f"seqpool      header='{size}'; inx='{inx}'")
+        robj.value = SEQPOOL[inx]
+    else:
+      raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
 
     logging.debug(header)
-
+    # S4 fields are stored as attribures (pairlist), so attr flag is true, but we will store them as data.
+    # so at this point for S4 we've already read attributes
+    if header["flags"]["attributes"] & (header["sexptype"] != 'S4SXP'):
+        logging.debug("---> start of object attributes")
+        attributes = parse_object(reader).value
+        if attributes != None:
+          robj.attributes = attributes
+        logging.debug("<--- end of object attributes")
+    
+    robj.attributes.append(["sexptype", header["sexptype"]])
+    return robj
 
 def parse_S4SXP(reader):
-    return parse_object(reader)
-
+    return parse_object(reader) # S4 is stored as LISTSXP, so just continue
 
 def parse_LISTSXP(reader):
-    return parse_object(reader)
-
+    # pairlist consist of sence of pairs [symbol,any R object], ended with NULL (254)
+    value = []
+    # assume that attribute name doesn't have own attributes
+    pair_name = parse_object(reader).value
+    pair_value = parse_object(reader)
+    value.append([pair_name,pair_value])
+    logging.debug(f"pair      '{pair_name}': '{pair_value}'")
+    # parse rest of pairs, assume that individaul pair doesn't have its own attributes
+    rest = parse_object(reader).value
+    if rest != None:
+        value.extend(rest)       # I assume attribute names are unique
+    return value
 
 def parse_SYMSXP(reader):
-    return parse_object(reader)
+    # should be text representation of literals
+    value = parse_object(reader).value
+    SEQPOOL.append(value)
+    return value
 
 
 def parse_CHARSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = struct.unpack(">i", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = reader.read(size).decode()
+    if size != -1:
+      value = reader.read(size).decode()
+    else:
+      value = None
     logging.debug(f"value      '{value}'")
     return value
 
@@ -229,8 +339,8 @@ def parse_STRSXP(reader):
     logging.debug(f"size       {size}")
     value = []
     for _ in range(size):
-        value.append(parse_object(reader))
-    logging.debug(f"STRSXP value      {value}")
+        value.append(parse_object(reader).value)
+    logging.debug(f"STRSXP value      {value[:min(10,len(value))]}")
     # value = reader.read(size)
     # try:
     #     value = value.decode()
@@ -263,6 +373,7 @@ def parse_INTSXP(reader):
         logging.debug(f"value      '{value[:10]}...[more]'")
     else:
         logging.debug(f"value      '{value}'")
+    value = [x if x != -2147483648 else None for x in value] # -2147483648 is NA
     return value
 
 
@@ -275,28 +386,26 @@ def parse_BUILTINSXP(reader):
 
 
 def parse_LGLSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
-    logging.debug(f"size       {size}")
-    value = "fake"
-    reader.seek(size * 4, 1)  # seek fakes reading into memory
-    # for _ in range(size):
-    #    value.append(struct.unpack('<I', reader.read(4))[0])
-    # logging.debug(f"value      '{value[:10]}'")
-    return value
+    # logical are stored as integers 
+    value = parse_INTSXP(reader)
+    return [v == 1 if v!= None else v for v in value]
 
 
 def parse_VECSXP(reader):
-    size = struct.unpack(">Q", reader.read(8))[0]
+    size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
     value = []
     for _ in range(size):
         value.append(parse_object(reader))
-    logging.debug(f"value      '{value}'")
+    logging.debug(f"value      '{value[:min(10,len(value))]}'")
     return value
 
 
 def parse_LANGSXP(reader):
-    return parse_object(reader)
+    raise NotImplementedError("parse_LANGSXP is not implemented")
+
+def parse_ENVSXP(reader):
+    raise NotImplementedError("parse_ENVSXP is not implemented")
 
 
 def parse_CLOSXP(reader):
@@ -311,7 +420,8 @@ def parse_CLOSXP(reader):
 
 if __name__ == "__main__":
     ## TESTS
-    rds_file = parse_rds("test_rds/pbmc_tutorial.rds")
+    rds_file = parse_rds("test_rds/seurat.rds") # should work on 10xPBMC
+    print(rds_file.object) # human readable representation
     # print("============")
     # rds_file = parse_rds("test_rds/211014KTOrganoid.rds")
     # print("============")
@@ -322,3 +432,13 @@ if __name__ == "__main__":
     # rds_file = parse_rds("test_rds/a.rds")
     # print("============")
     # rds_file = parse_rds("test_rds/list.rds")
+    # print("============")
+    # rds_file = parse_rds("test_rds/list.rds")
+    # rds below are not working
+    print('!!!!!!!!!!!!!!!!!!!!!!!!')
+    rds_file = parse_rds("test_rds/env.rds") # environments are not implemented
+    # these two are not working for yet unkown reasons
+    rds_file = parse_rds('/nfs/users/nfs_p/pm19/nfs/projects/2303.bcc.skin/data.nfs/tic-2123/bcc.epi-3-CG.rds')
+    rds_file = parse_rds('/nfs/users/nfs_p/pm19/nfs/projects/2303.bcc.skin/data.nfs/nmf.frq.r5.n100.rds')
+
+    
