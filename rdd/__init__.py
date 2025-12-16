@@ -5,15 +5,16 @@ import logging
 __version__ = "0.0.1"
 
 logging.basicConfig(level="DEBUG", format="[%(asctime)s][%(levelname)s] %(message)s")
-logging.getLogger().setLevel('INFO')
+logging.getLogger().setLevel('DEBUG')
 
 # REFERENCES:
 # https://cran.r-project.org/doc/manuals/r-release/R-ints.html#Serialization-Formats
 # https://github.com/LTLA/rds2cpp/blob/master/include/rds2cpp/parse_object.hpp#L30
 # https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/
-
+# https://github.com/wch/r-source/blob/79298c499218846d14500255efd622b5021c10ec/src/main/serialize.c#L1855
 
 SEXPTYPEs = {
+   #-1: {"SEXPTYPE": "MINUS_ONE", "description": "NULL"}, # no idea what it is
     0: {"SEXPTYPE": "NILSXP", "description": "NULL"},
     1: {"SEXPTYPE": "SYMSXP", "description": "symbols"},
     2: {"SEXPTYPE": "LISTSXP", "description": "pairlists"},
@@ -38,8 +39,13 @@ SEXPTYPEs = {
     23: {"SEXPTYPE": "WEAKREFSXP", "description": "weak"},
     24: {"SEXPTYPE": "RAWSXP", "description": "reference raw vector"},
     25: {"SEXPTYPE": "S4SXP", "description": "S4 classes"},
+    238: {"SEXPTYPE": "ALTREP", "description": "ALTREP_SXP / custom ALTREP"}, 
+    242: {"SEXPTYPE": "EMPTYENV", "description": "NULL"},
+    249: {"SEXPTYPE": "NAMESPACESXP", "description": "NULL"},
+    251: {"SEXPTYPE": "MISSINGARG", "description": "NULL"},
+    253: {"SEXPTYPE": "GLOBALENV", "description": "NULL"},
     254: {"SEXPTYPE": "NILSXP", "description": "NULL"},
-    255: {"SEXPTYPE": "SEQPOOL", "description": "NULL"}, # it is not official sextype, but in it will make parsing seqpooled symbols smoother
+    255: {"SEXPTYPE": "REF", "description": "reference to previous object"}, 
 }
 
 # pairlist names seems to be stored into pool and be referenced on next occurences
@@ -57,6 +63,12 @@ class RdsFile:
         self.environments = []
         self.symbols = []
         self.external_pointers = []
+        
+    def __str__(self):
+      return self.object.toString()
+    
+    def __repr__(self):
+      return self.object.toString()
 
 class Robj:
     def __init__(self):
@@ -107,7 +119,15 @@ class Robj:
           else:
             result += "{\n"
             for k in self.value:
-              result += k[1].toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,header=k[0]+":",sep=sep) + ",\n"
+              # not sure I understand where this None come from
+              if k == None:
+                result += indent+sep+sep + 'None'
+              elif not isinstance(k,list):
+                result += indent+sep+sep + str(k)
+              elif isinstance(k[1],Robj):
+                result += k[1].toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,header=str(k[0])+":",sep=sep) + ",\n"
+              else:
+                result += indent+sep+sep + str(k[1])
             result = result[:(len(result)-2)]
             result += "\n" + indent + sep+"}"
         # nested Robj
@@ -121,7 +141,7 @@ class Robj:
         for k in self.attributes:
             result += "\n" 
             if isinstance(k[1],Robj):
-              result += k[1].toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,header=k[0]+":",sep=sep) + ","
+              result += k[1].toString(indent=indent+sep+sep,withAttr=withAttr,maxItems=maxItems,header=str(k[0])+":",sep=sep) + ","
             else:
               result += indent + sep +sep + k[0] +": " + str(k[1]) + ","
         if len(self.attributes)>0:
@@ -136,6 +156,9 @@ def parse_object_header(reader):
     logging.debug(f"---> start of object header (0x{reader.tell():02X})")
 
     object_header = [reader.read(1) for _ in range(4)]
+    if any(len(b) == 0 for b in object_header):
+        raise EOFError("Unexpected end of file while reading object header")
+
     header_bin = [f"{struct.unpack('>B',b)[0]:08b}" for b in object_header]
     logging.debug(f"header {header_bin}")
 
@@ -163,7 +186,7 @@ def parse_object_header(reader):
         "sexptype": SEXPTYPEs[sexp_type]["SEXPTYPE"] if sexp_type in SEXPTYPEs else -1,
         "flags": {
             "object": object_bit,
-            "attributes": attributes_bit & (sexp_type < 255),  # sexp_type==255 is symbol, symbol has no attributes (I hope), but have sepool index in preceeding bytes
+            "attributes": attributes_bit & (sexp_type < 255),  # sexp_type==255 is symbol, symbol has no attributes (I hope), but have seqpool index in preceeding bytes
             "tag": tag_bit,
             "gp": gp_bit,
         },
@@ -228,12 +251,28 @@ def parse_object(reader):
         robj.value = parse_S4SXP(reader)
 
     elif header["sexptype"] == "LISTSXP":
-        logging.debug(f">> LISTSXP")
-        robj.value = parse_LISTSXP(reader)
+        logging.debug(">> LISTSXP")
+        # For pairlists, attributes are serialized BEFORE TAG/CAR/CDR.
+        attrs = None
+        if header["flags"]["attributes"]:
+            logging.debug("---> start of LISTSXP attributes")
+            attrs = parse_object(reader).value
+            logging.debug("<--- end of LISTSXP attributes")
+        robj.value = parse_LISTSXP(reader, header["flags"]["tag"])
+        if attrs is not None:
+            robj.attributes = attrs
 
     elif header["sexptype"] == "LANGSXP":
-        logging.debug(f">> LANGSXP")
-        robj.value = parse_LANGSXP(reader)
+        logging.debug(">> LANGSXP")
+        # Language objects have the same pairlist layout as LISTSXP.
+        attrs = None
+        if header["flags"]["attributes"]:
+            logging.debug("---> start of LANGSXP attributes")
+            attrs = parse_object(reader).value
+            logging.debug("<--- end of LANGSXP attributes")
+        robj.value = parse_LISTSXP(reader, header["flags"]["tag"])
+        if attrs is not None:
+            robj.attributes = attrs
 
     elif header["sexptype"] == "SYMSXP":
         logging.debug(f">> SYMSXP expecting CHARSXP after")
@@ -269,30 +308,62 @@ def parse_object(reader):
 
     elif header["sexptype"] == "CLOSXP":
         logging.debug(f">> CLOSXP")
-        robj.value = parse_CLOSXP(reader)
+        robj.value = parse_CLOSXP(reader,header["flags"]["attributes"])
     
     elif header["sexptype"] == "ENVSXP":
         logging.debug(f">> ENVSXP")
         robj.value = parse_ENVSXP(reader)
+    
+    elif header["sexptype"] == "BCODESXP":
+        logging.debug(">> BCODESXP (bytecode)")
+        robj.value = parse_BCODESXP(reader)
 
-    elif header["sexptype"] == "NILSXP":
+    elif header["sexptype"] in ["NILSXP",'MISSINGARG','GLOBALENV','EMPTYENV','MINUS_ONE']:
         robj.value = None
-    # assume it is symbol from seqpool
-    elif header['sexptype'] == 'SEQPOOL':
-        size = struct.unpack(">I",b''.join(header['bytes']))[0]
-        inx = (size+1)//(2**8)-2
-        logging.debug(f"seqpool      header='{size}'; inx='{inx}'")
-        robj.value = SEQPOOL[inx]
+        
+    elif header["sexptype"] == "NAMESPACESXP":
+        logging.debug(">> NAMESPACESXP")
+        robj.value = parse_NAMESPACESXP(reader)
+    # REFSXP / pooled symbol reference
+    elif header["sexptype"] == "REF":
+        # In the original hack this was treated purely as a SEQPOOL
+        # entry for symbols. That works for simple RDS files but fails
+        # once REF is also used for environments, functions, etc.
+        #
+        # The reference index is encoded in the same 4 bytes as the flag,
+        # and the original code derived a 'pool index' like this:
+        #     inx = (size + 1) // 256 - 2
+        size = struct.unpack(">I", b"".join(header["bytes"]))[0]
+        inx = (size + 1) // 256 - 2
+        logging.debug(f"REF header='{size}'; derived index='{inx}'")
+
+        if 0 <= inx < len(SEQPOOL):
+            # Looks like this REF is actually pointing into the symbol pool.
+            robj.value = SEQPOOL[inx]
+            logging.debug(f"REF resolved from SEQPOOL[{inx}] = {robj.value!r}")
+        else:
+            # This REF is not a pooled symbol (e.g. environment, other object),
+            # and we don’t currently maintain a full reference table. To keep
+            # parsing robust and avoid crashes, we return a placeholder.
+            logging.warning(
+                f"REF index {inx} out of SEQPOOL range (len={len(SEQPOOL)}); "
+                "treating as opaque reference placeholder"
+            )
+            robj.value = f"<REF_{inx}>"
+    elif header["sexptype"] == "ALTREP":
+        logging.debug(">> ALTREP")
+        robj.value = parse_ALTREP(reader)
+
     else:
       raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
 
     logging.debug(header)
     # S4 fields are stored as attribures (pairlist), so attr flag is true, but we will store them as data.
     # so at this point for S4 we've already read attributes
-    if header["flags"]["attributes"] & (header["sexptype"] != 'S4SXP'):
+    if header["flags"]["attributes"] and header["sexptype"] not in ('S4SXP','ENVSXP','CLOSXP', 'LISTSXP', 'LANGSXP','ALTREP','NAMESPACESXP'):
         logging.debug("---> start of object attributes")
         attributes = parse_object(reader).value
-        if attributes != None:
+        if attributes is not None:
           robj.attributes = attributes
         logging.debug("<--- end of object attributes")
     
@@ -302,24 +373,146 @@ def parse_object(reader):
 def parse_S4SXP(reader):
     return parse_object(reader) # S4 is stored as LISTSXP, so just continue
 
-def parse_LISTSXP(reader):
-    # pairlist consist of sence of pairs [symbol,any R object], ended with NULL (254)
+def parse_LISTSXP(reader, has_tag):
+    """
+    Parse a dotted pair / pairlist object (LISTSXP, also used for LANGSXP).
+
+    Serialization layout for each cons cell (serialize.c):
+
+        [ATTRIB] (handled outside this function)
+        [TAG]  (only if has_tag == True)
+        [CAR]
+        [CDR]  (another LISTSXP cell, or NILSXP terminator)
+
+    'has_tag' is constant for the entire list – either every cell has a
+    tag or none of them do.
+    """
     value = []
-    # assume that attribute name doesn't have own attributes
-    pair_name = parse_object(reader).value
+
+    # TAG or None
+    if has_tag:
+        pair_name = parse_object(reader).value
+    else:
+        pair_name = None
+
+    # CAR (always present)
     pair_value = parse_object(reader)
-    value.append([pair_name,pair_value])
+    value.append([pair_name, pair_value])
     logging.debug(f"pair      '{pair_name}': '{pair_value}'")
-    # parse rest of pairs, assume that individaul pair doesn't have its own attributes
-    rest = parse_object(reader).value
-    if rest != None:
-        value.extend(rest)       # I assume attribute names are unique
+
+    # CDR: either another pairlist cell or NULL terminator
+    rest = parse_object(reader)
+
+    if rest.value is not None:
+        # A proper pairlist from our parser should be represented as a list
+        # of [name, Robj] pairs (and not as a list of Robj instances).
+        if isinstance(rest.value, list) and (
+            len(rest.value) == 0 or not isinstance(rest.value[0], Robj)
+        ):
+            value.extend(rest.value)
+        else:
+            # Unexpected structure in CDR; preserve it as a single item so
+            # we don't lose information.
+            value.append([None, rest])
+
     return value
+
+def parse_NAMESPACESXP(reader):
+    """
+    Parse a NAMESPACESXP (code 249).
+
+    R's ReadItem does:
+
+        SEXP s = InStringVec(stream, ref_table);
+        s = R_FindNamespace1(s);
+
+    InStringVec reads:
+        - placeholder int (must be 0),
+        - length (int),
+        - then 'length' strings via ReadItem (usually CHARSXP).
+
+    Here we:
+      * Read the placeholder and length.
+      * Read 'length' string objects with parse_object.
+      * Return a Python list of strings (namespace spec), similar to STRSXP.
+
+    The enclosing Robj will still get an attribute ['sexptype', 'NAMESPACESXP'],
+    so you can distinguish it from a normal STRSXP if needed.
+    """
+
+    # Placeholder (should be 0).
+    placeholder = struct.unpack(">i", reader.read(4))[0]
+    logging.debug(f"NAMESPACESXP placeholder: {placeholder}")
+    if placeholder != 0:
+        logging.warning(
+            f"NAMESPACESXP: expected placeholder 0 but found {placeholder}"
+        )
+
+    # Length of the string vector.
+    length = struct.unpack(">i", reader.read(4))[0]
+    logging.debug(f"NAMESPACESXP string vector length: {length}")
+
+    strings = []
+    for i in range(length):
+        elt = parse_object(reader)   # typically CHARSXP Robj
+        strings.append(elt.value)
+        logging.debug(f"NAMESPACESXP element {i}: {elt.value!r}")
+
+    # Just return the list of strings, STRSXP-style.
+    return strings
+
 
 def parse_SYMSXP(reader):
     # should be text representation of literals
     value = parse_object(reader).value
     SEQPOOL.append(value)
+    return value
+
+def parse_ALTREP(reader):
+    """
+    Parse an ALTREP object (ALTREP_SXP, code 238).
+
+    According to R's serialize.c (ReadItem):
+
+        case ALTREP_SXP:
+        {
+            R_ReadItemDepth++;
+            SEXP info  = ReadItem(ref_table, stream);
+            SEXP state = ReadItem(ref_table, stream);
+            SEXP attr  = ReadItem(ref_table, stream);
+            s = ALTREP_UNSERIALIZE_EX(info, state, attr, objf, levs);
+            ...
+        }
+
+    We cannot call ALTREP_UNSERIALIZE_EX from Python, so we expose the
+    three components directly:
+
+        value = [
+            ["info",  <Robj>],
+            ["state", <Robj>],
+            ["attr",  <Robj>],
+        ]
+
+    This keeps the stream aligned and lets Robj.toString() print something
+    sensible for ALTREP objects.
+    """
+
+    logging.debug("ALTREP: parsing info")
+    info = parse_object(reader)   # usually something indicating ALTREP class
+
+    logging.debug("ALTREP: parsing state")
+    state = parse_object(reader)  # ALTREP-specific state (e.g., length/start/step)
+
+    logging.debug("ALTREP: parsing attr")
+    attr = parse_object(reader)   # attributes that R would attach to the final object
+
+    value = [
+        ["info", info],
+        ["state", state],
+        ["attr", attr],
+    ]
+
+    logging.debug("ALTREP parsed into info/state/attr triple")
     return value
 
 
@@ -396,27 +589,314 @@ def parse_VECSXP(reader):
     logging.debug(f"size       {size}")
     value = []
     for _ in range(size):
+        logging.debug(f"VECSXP: {_}/{size}")
         value.append(parse_object(reader))
     logging.debug(f"value      '{value[:min(10,len(value))]}'")
     return value
 
 
-def parse_LANGSXP(reader):
-    raise NotImplementedError("parse_LANGSXP is not implemented")
-
 def parse_ENVSXP(reader):
-    raise NotImplementedError("parse_ENVSXP is not implemented")
+    """
+    Parse an R environment (ENVSXP) according to R's serialize.c ReadItem:
 
+        int locked = InInteger(stream);
+        ENCLOS  = ReadItem(...)
+        FRAME   = ReadItem(...)
+        HASHTAB = ReadItem(...)
+        ATTRIB  = ReadItem(...)
 
-def parse_CLOSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
-    logging.debug(f"size       {size}")
-    value = "fake"
-    reader.seek(size, 1)  # seek fakes reading into memory
-    # value = reader.read(size)
-    # logging.debug(f"value      '{value}'")
+    We expose a simple structure as a pairlist-like list of [name, Robj]
+    pairs, and include the locked flag and environment-specific attributes
+    inside the value.
+    """
+
+    # locked flag
+    locked = struct.unpack(">i", reader.read(4))[0]
+    logging.debug(f"ENVSXP locked flag: {locked}")
+
+    # ENCLOS: enclosing environment
+    logging.debug("ENVSXP: parsing enclosure (ENCLOS)")
+    enclos = parse_object(reader)
+
+    # FRAME: symbol/value bindings pairlist
+    logging.debug("ENVSXP: parsing frame (FRAME)")
+    frame = parse_object(reader)
+
+    # HASHTAB: hash table, often NULL or VECSXP
+    logging.debug("ENVSXP: parsing hash table (HASHTAB)")
+    hashtab = parse_object(reader)
+
+    # ATTRIB: environment-specific attributes
+    logging.debug("ENVSXP: parsing attributes (ATTRIB)")
+    env_attrs = parse_object(reader)
+
+    env_value = [
+        ["locked", locked],
+        ["enclos", enclos],
+        ["frame", frame],
+        ["hashtab", hashtab],
+        ["env_attrs", env_attrs],
+    ]
+
+    return env_value
+
+def parse_CLOSXP(reader, has_attributes=False):
+    """
+    Parse an R closure (CLOSXP).
+
+    Layout:
+
+        [CLOSXP header]
+        [ATTRIB] ?  if has_attributes
+        [CLOENV]
+        [FORMALS]
+        [BODY]
+    """
+
+    if has_attributes:
+        logging.debug("CLOSXP has attributes -> consuming attribute object")
+        _attr_robj = parse_object(reader)  # ignored, just advance stream
+        logging.debug("CLOSXP attributes consumed (ignored)")
+
+    logging.debug("CLOSXP: parsing environment (CLOENV)")
+    env_robj = parse_object(reader)
+
+    logging.debug("CLOSXP: parsing formals (FORMALS)")
+    formals_robj = parse_object(reader)
+
+    logging.debug("CLOSXP: parsing body (BODY)")
+    body_robj = parse_object(reader)
+
+    value = [
+        ["env", env_robj],
+        ["formals", formals_robj],
+        ["body", body_robj],
+    ]
+
+    logging.debug("CLOSXP parsed into env/formals/body triple")
     return value
 
+
+# start of BCODESXP ####
+# Bytecode helper constants from serialize.c
+BCODESXP_CODE    = 21   # standard R SEXP type
+LANGSXP_CODE     = 6
+LISTSXP_CODE     = 2
+
+BCREPDEF_CODE    = 244
+BCREPREF_CODE    = 243
+ATTRLANGSXP_CODE = 240
+ATTRLISTSXP_CODE = 239
+
+
+def parse_BCODESXP(reader):
+    """
+    Parse a BCODESXP (bytecode object).
+
+    R's ReadItem for BCODESXP calls ReadBC, which does:
+
+        reps_len = InInteger(stream);
+        reps     = allocVector(VECSXP, reps_len);
+        s        = ReadBC1(ref_table, reps, stream);
+
+    ReadBC1 then reads:
+        code   = ReadItem(...)
+        consts = ReadBCConsts(...)
+
+    We mirror that structure but return a pairlist-style value:
+
+        [
+          ["code",   <Robj>],
+          ["consts", <Robj with value = list of const Robj>]
+        ]
+    """
+
+    # ---- reps length (for shared subtrees in bytecode language) ----
+    reps_len = struct.unpack(">i", reader.read(4))[0]
+    logging.debug(f"BCODESXP: reps_len = {reps_len}")
+    reps = [None] * max(reps_len, 0)
+
+    value = _read_bc1(reader, reps)
+    return value
+
+
+def _read_bc1(reader, reps):
+    """
+    Python version of ReadBC1(ref_table, reps, stream).
+
+    Layout:
+
+        code   = ReadItem(...)
+        consts = ReadBCConsts(...)
+    """
+
+    logging.debug("BCODESXP: reading bytecode 'code' object")
+    code_robj = parse_object(reader)
+
+    logging.debug("BCODESXP: reading bytecode const pool")
+    consts_list = _read_bc_consts(reader, reps)  # list of Robj / nested BC
+
+    # Wrap consts list into an Robj so that it prints as a list.
+    consts_robj = Robj()
+    consts_robj.value = consts_list
+    consts_robj.attributes = []
+
+    # BCODESXP value is represented as a pairlist-style list of [name, Robj]
+    # so that Robj.toString() prints it nicely.
+    value = [
+        ["code", code_robj],
+        ["consts", consts_robj],
+    ]
+
+    logging.debug("BCODESXP: finished ReadBC1")
+    return value
+
+
+def _read_bc_consts(reader, reps):
+    """
+    Python version of ReadBCConsts(ref_table, reps, stream).
+
+    Layout:
+
+        n = InInteger(stream)
+        for i in 0..n-1:
+            type_code = InInteger(stream)
+            ... then type-specific payload ...
+    """
+    n = struct.unpack(">i", reader.read(4))[0]
+    logging.debug(f"BCODESXP consts: n = {n}")
+
+    consts = []
+    for i in range(n):
+        type_code = struct.unpack(">i", reader.read(4))[0]
+        logging.debug(f"BCODESXP const[{i}] type_code = {type_code}")
+
+        if type_code == BCODESXP_CODE:
+            # Nested bytecode object; use BC1 (no new reps_len).
+            logging.debug("BCODESXP const: nested BCODESXP")
+            const_val = _read_bc1(reader, reps)
+
+            # Wrap nested BC in an Robj for consistency.
+            nested = Robj()
+            nested.value = const_val
+            nested.attributes = [["sexptype", "BCODESXP"]]
+            consts.append(nested)
+
+        elif type_code in (
+            LANGSXP_CODE,
+            LISTSXP_CODE,
+            BCREPDEF_CODE,
+            BCREPREF_CODE,
+            ATTRLANGSXP_CODE,
+            ATTRLISTSXP_CODE,
+        ):
+            logging.debug("BCODESXP const: using ReadBCLang-style parser")
+            const_val = _read_bc_lang(reader, type_code, reps)
+            consts.append(const_val)
+
+        else:
+            # Default case in ReadBCConsts: ReadItem(...)
+            logging.debug("BCODESXP const: delegating to parse_object()")
+            const_val = parse_object(reader)
+            consts.append(const_val)
+
+    return consts
+
+
+def _read_bc_lang(reader, type_code, reps):
+    """
+    Python version of ReadBCLang(int type, ...).
+
+    This handles the compressed representation of language / pairlist
+    objects inside the bytecode constant pool.
+
+    It returns an Robj whose .value is a pairlist-like list of
+    [name, Robj/primitive] pairs:
+
+        [
+          ["bctype", "LANGSXP" | "LISTSXP" | ...],
+          ["tag",    <Robj>],
+          ["car",    <Robj or bc-lang>],
+          ["cdr",    <Robj or bc-lang>],
+        ]
+    """
+
+    # BCREPREF: reference to a previously defined bc-lang node.
+    if type_code == BCREPREF_CODE:
+        idx = struct.unpack(">i", reader.read(4))[0]
+        logging.debug(f"ReadBCLang: BCREPREF idx={idx}")
+        if 0 <= idx < len(reps):
+            return reps[idx]
+        logging.warning(f"ReadBCLang: BCREPREF idx={idx} out of range")
+        return None
+
+    # BCREPDEF / LANGSXP / LISTSXP / ATTRLANGSXP / ATTRLISTSXP
+    pos = -1
+    hasattr = False
+    t = type_code
+
+    if t == BCREPDEF_CODE:
+        # BCREPDEF: position + actual type
+        pos = struct.unpack(">i", reader.read(4))[0]
+        t = struct.unpack(">i", reader.read(4))[0]
+        logging.debug(f"ReadBCLang: BCREPDEF pos={pos}, underlying type={t}")
+
+    # Handle attribute-wrapped types.
+    if t == ATTRLANGSXP_CODE:
+        t = LANGSXP_CODE
+        hasattr = True
+    elif t == ATTRLISTSXP_CODE:
+        t = LISTSXP_CODE
+        hasattr = True
+
+    # Determine a human-readable type name.
+    type_name = SEXPTYPEs.get(t, {}).get("SEXPTYPE", f"TYPE_{t}")
+
+    node = Robj()
+    node.attributes = []
+
+    # Optional attributes on the bc-lang node.
+    attr_robj = None
+    if hasattr:
+        logging.debug("ReadBCLang: reading attributes")
+        attr_robj = parse_object(reader)
+
+    logging.debug("ReadBCLang: reading TAG")
+    tag_robj = parse_object(reader)
+
+    logging.debug("ReadBCLang: reading CAR type")
+    car_type = struct.unpack(">i", reader.read(4))[0]
+    car_val = _read_bc_lang(reader, car_type, reps)
+
+    logging.debug("ReadBCLang: reading CDR type")
+    cdr_type = struct.unpack(">i", reader.read(4))[0]
+    cdr_val = _read_bc_lang(reader, cdr_type, reps)
+
+    # Store in reps[] if this was a BCREPDEF node.
+    if 0 <= pos < len(reps):
+        reps[pos] = node
+
+    # Represent the bc-lang node as a pairlist-style value.
+    value = [
+        ["bctype", type_name],
+        ["tag", tag_robj],
+        ["car", car_val],
+        ["cdr", cdr_val],
+    ]
+    node.value = value
+
+    # If there were attributes, attach them as normal Robj attributes.
+    if attr_robj is not None:
+        # If the attributes object is itself a pairlist, we can just copy its
+        # .value; otherwise wrap it in a simple pair.
+        if isinstance(attr_robj.value, list):
+            node.attributes = attr_robj.value
+        else:
+            node.attributes = [["attr", attr_robj]]
+
+    return node
+
+# end of BCODESXP ####
 
 if __name__ == "__main__":
     ## TESTS
