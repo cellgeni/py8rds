@@ -3,8 +3,9 @@ requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "rdd"
-authors = [{ name="Pasha Mazin", email="pavel.mazin@sanger.ac.uk" }]
+name = "py8rds"
+authors = [{ name="Pasha Mazin", email="pm19@sanger.ac.uk" },
+           { name = "Martin Prete", email = "mp33@sanger.ac.uk" }]
 description = "R Data Deserialization in python"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -18,8 +19,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cellgeni/rdd-py"
-Issues = "https://github.com/cellgeni/rdd-py/issues"
+Homepage = "https://github.com/cellgeni/py8rds"
+Issues = "https://github.com/cellgeni/py8rds/issues"
 
 [tool.black]
 line-length = 120
