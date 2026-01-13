@@ -1,4 +1,6 @@
-# R Data deSerialization (readRDS) in python
+# 🐍 🍽️ RDS
+
+`py8rds` *(python ate RDS)* provides pure-Python deserialization of R `.rds` files, allowing you to load R data directly into Python without requiring an R installation.
 
 ## Getting Started
 
@@ -12,18 +14,18 @@ To get a local copy up and running follow these steps.
 
 Use pip to install directly from the repo
 ```bash
-pip install git+hhttps://github.com/cellgeni/rdd-py.git
+pip install git+hhttps://github.com/cellgeni/py8rds.git
 ```
 
 ### Development Installation
 
 1. Clone the repo
    ```bash
-   git clone hhttps://github.com/cellgeni/rdd-py.git
+   git clone hhttps://github.com/cellgeni/py8rds.git
    ```
 2. Usse pip to install in [editable mode](https://setuptools.pypa.io/en/latest/userguide/development_mode.html)
    ```bash
-   pip install --editable ./rdd-py
+   pip install --editable ./py8rds
    ```
 
 ## Usage
