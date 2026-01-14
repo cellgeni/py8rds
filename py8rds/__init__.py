@@ -378,20 +378,30 @@ def parse_object(reader,rds: RdsFile):
     elif header["sexptype"] == "ALTREP":
         logging.debug(">> ALTREP")
         robj.value = parse_ALTREP(reader,rds)
-
+    elif header["sexptype"] == "EXTPTRSXP":
+      logging.debug(">> EXTPTRSXP")
+      val, attrs = parse_EXTPTRSXP(reader, rds)
+      robj.value = val
+      if attrs is not None:
+          robj.attributes = attrs
+          
     else:
       raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
 
     logging.debug(header)
     # S4 fields are stored as attribures (pairlist), so attr flag is true, but we will store them as data.
     # so at this point for S4 we've already read attributes
-    if header["flags"]["attributes"] and header["sexptype"] not in ('S4SXP','ENVSXP','CLOSXP', 'LISTSXP', 'LANGSXP','ALTREP','NAMESPACESXP'):
+    if header["flags"]["attributes"] and header["sexptype"] not in ('S4SXP','ENVSXP','CLOSXP', 'LISTSXP', 'LANGSXP','ALTREP','NAMESPACESXP','EXTPTRSXP'):
         logging.debug("---> start of object attributes")
         attributes = parse_object(reader,rds).value
         if attributes is not None:
           robj.attributes = attributes
         logging.debug("<--- end of object attributes")
     
+    # shit happens
+    if not isinstance(robj.attributes, list):
+      robj.attributes = [["__raw_attributes__",robj.attributes]]
+            
     robj.attributes.append(["sexptype", header["sexptype"]])
     
     return robj
@@ -763,7 +773,7 @@ def _read_bc1(reader, reps,rds):
     # Wrap consts list into an Robj so that it prints as a list.
     consts_robj = Robj()
     consts_robj.value = consts_list
-    consts_robj.attributes = {}
+    consts_robj.attributes = []
 
     # BCODESXP value is represented as a pairlist-style list of [name, Robj]
     # so that Robj.toString() prints it nicely.
@@ -878,7 +888,7 @@ def _read_bc_lang(reader, type_code, reps,rds):
     type_name = SEXPTYPEs.get(t, {}).get("SEXPTYPE", f"TYPE_{t}")
 
     node = Robj()
-    node.attributes = {}
+    node.attributes = []
 
     # Optional attributes for the bc-lang node
     attr_robj = None
@@ -918,6 +928,46 @@ def _read_bc_lang(reader, type_code, reps,rds):
             node.attributes = [["attr", attr_robj]]
 
     return node
+  
+def parse_EXTPTRSXP(reader, rds):
+    """
+    Parse EXTPTRSXP (external pointer).
+
+    According to R serialize.c:
+      - pointer value itself is NOT serialized (restored as NULL)
+      - prot, tag, and attributes ARE serialized
+
+    Layout on disk:
+        [EXTPTRSXP header]
+        PROT  = ReadItem(...)
+        TAG   = ReadItem(...)
+        ATTR  = ReadItem(...)
+
+    We represent this as:
+        value = [
+            ["ptr",  None],
+            ["prot", <Robj>],
+            ["tag",  <Robj>],
+        ]
+    """
+
+    logging.debug("EXTPTRSXP: parsing prot")
+    prot = parse_object(reader, rds)
+
+    logging.debug("EXTPTRSXP: parsing tag")
+    tag = parse_object(reader, rds)
+
+    logging.debug("EXTPTRSXP: parsing attributes")
+    attrs = parse_object(reader, rds)
+
+    value = [
+        ["ptr", None],   # pointer is always NULL after unserialization
+        ["prot", prot],
+        ["tag", tag],
+    ]
+
+    return value, attrs
+
 
 # end of BCODESXP ####
 
@@ -954,44 +1004,9 @@ def as_data_frame(robj):
   r.index = robj.get('row.names').value
   return r
 
-def matrix2anndata(robj):
-  cl = robj.getClass()
-  if cl == 'dgCMatrix':
-    return dgCMatrix2anndata(robj)
-  if cl == 'REALSXP':
-    return array2anndata(robj)
-    
-def array2anndata(robj):
+def as_numpy(robj):
   """
-  Converts Robj with [named] 2D array into anndata (in order to keep names)
-  
-  Parameters
-  ----------
-  robj : Robj
-
-  Returns
-  -------
-  AnnData
-
-  Examples
-  --------
-  array2anndata(robj)
-  """
-  X = array2numpy(robj).T
-  adata = ad.AnnData(X=X)
-  
-  dimnames = robj.get('dimnames')
-  if dimnames is not None:
-    dimnames = dimnames.value
-    if dimnames[0].value is not None:
-      adata.var_names = dimnames[0].value
-    if dimnames[1].value is not None:
-      adata.obs_names = dimnames[1].value
-  return adata
-
-def array2numpy(robj):
-  """
-  Converts Robj with array into numpy array
+  Converts Robj with array/Matrix into dense/sparse numpy array
   
   Parameters
   ----------
@@ -1003,19 +1018,17 @@ def array2numpy(robj):
 
   Examples
   --------
-  array2numpy(robj)
+  as_numpy(robj)
   """
-  dim = robj.get('dim')
-  if dim is None:
-    dim = len(robj.value)
-  else:
-    dim = dim.value
-  X = np.array(robj.value).reshape(dim,order='F')
-  return X
-  
-def dgCMatrix2anndata(robj):
+  cl = robj.getClass()
+  if cl == 'dgCMatrix':
+    return _dgCMatrix2numpy(robj)
+  if cl == 'REALSXP':
+    return _array2numpy(robj)
+
+def as_anndata(robj):
   """
-  Converts Robj with [named] dgCMatrix into anndata (in order to keep names)
+  Converts Robj with array/Matrix into dense/sparse anndata keeping dimnames if any
   
   Parameters
   ----------
@@ -1023,25 +1036,26 @@ def dgCMatrix2anndata(robj):
 
   Returns
   -------
-  AnnData
+  ad.AnnData
 
   Examples
   --------
-  dgCMatrix2anndata(robj)
+  as_anndata(robj)
   """
-  i = robj.get('i').value
-  p = robj.get('p').value
-  dim = robj.get('Dim').value
-  x = robj.get('x').value
-  dimnames = robj.get('Dimnames').value
-  X = sparse.csc_matrix((x, i, p), dim).T
+  X = as_numpy(robj).T
   adata = ad.AnnData(X=X)
-  if dimnames[0].value is not None:
-    adata.var_names = dimnames[0].value
-  if dimnames[1].value is not None:
-    adata.obs_names = dimnames[1].value
+  dimnames = robj.get('dimnames')
+  if( dimnames is None):
+    dimnames = robj.get('Dimnames') # for sparse Matrices 
+  
+  if dimnames is not None:
+    dimnames = dimnames.value
+    if dimnames[0].value is not None:
+      adata.var_names = dimnames[0].value
+    if dimnames[1].value is not None:
+      adata.obs_names = dimnames[1].value
   return adata
-
+    
 def seurat2adata(robj,assay=0,layer='counts'):
   """
   Converts Seurat Robj into anndata
@@ -1071,15 +1085,15 @@ def seurat2adata(robj,assay=0,layer='counts'):
   obs = as_data_frame(robj.get('meta.data'))
   
   if cnts is not None:
-    adata = matrix2anndata(cnts)
-    var = as_data_frame(robj.get(['assays',assay,'meta.features']))
+    adata = as_anndata(cnts)
+    adata.var = as_data_frame(robj.get(['assays',assay,'meta.features']))
     adata.obs = obs.loc[adata.obs_names,:]
   # try Assay5
   else:
     names = robj.get(['assays',assay,'layers','names']).value
     layer = names.index(layer)
     cnts  = robj.get(['assays',assay,'layers',layer])
-    adata = matrix2anndata(cnts)
+    adata = as_anndata(cnts)
     adata.var_names = robj.get(['assays',0,'features','dimnames',0]).value
     adata.obs = obs
   # load reduced dims
@@ -1088,8 +1102,44 @@ def seurat2adata(robj,assay=0,layer='counts'):
   if rdims_names is not None:
     rdims_names = rdims_names.value
     for i in range(len(rdims_names)):
-      adata.obsm[rdims_names[i]] = array2numpy(rdims.get([i,'cell.embeddings']))
+      adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i,'cell.embeddings']))
   
   return adata
+
+def _array2numpy(robj):
+  """
+  Converts Robj with array into dense numpy array
+  Expect R array (dense)
+  
+  Parameters
+  ----------
+  robj : Robj
+
+  Returns
+  -------
+  np.array
+
+  Examples
+  --------
+  _array2numpy(robj)
+  """
+  dim = robj.get('dim')
+  if dim is None:
+    dim = len(robj.value)
+  else:
+    dim = dim.value
+  X = np.array(robj.value).reshape(dim,order='F')
+  return X
+  
+def _dgCMatrix2numpy(robj):
+  i = robj.get('i').value
+  p = robj.get('p').value
+  dim = robj.get('Dim').value
+  x = robj.get('x').value
+  dimnames = robj.get('Dimnames').value
+  X = sparse.csc_matrix((x, i, p), dim)
+  return X
+
+
 
     
