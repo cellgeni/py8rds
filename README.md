@@ -2,49 +2,33 @@
 
 `py8rds` *(python ate RDS)* provides pure-Python deserialization of R `.rds` files, allowing you to load R data directly into Python without requiring an R installation.
 
-## Getting Started
 
-To get a local copy up and running follow these steps.
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.8+
 
-### Installation
+## Installation
 
 Use pip to install directly from the repo
 ```bash
 pip install git+hhttps://github.com/cellgeni/py8rds.git
 ```
 
-### Development Installation
-
-1. Clone the repo
-   ```bash
-   git clone hhttps://github.com/cellgeni/py8rds.git
-   ```
-2. Usse pip to install in [editable mode](https://setuptools.pypa.io/en/latest/userguide/development_mode.html)
-   ```bash
-   pip install --editable ./py8rds
-   ```
-
 ## Usage
 
 ```python
-import rdd
-
-result = rdd.parse_rds("myfile.rds")
-
-print(result.values)
+import py8rds
+df = py8rds.as_data_frame('data_frame.rds')
+adata = py8rds.as_anndata('seurat.rds')
+robj = py8rds.parse_rds('data.rds')
+robj.show()
 ```
+Please check the [tutorial](tutorials/tutorial.ipynb). 
 
 
-### Testing
+## Details
 
-From the package folder, run:
-```bash
-python -m unittest tests
-```
-
-Test data is created using `tests/create_test_data.R`  which requires a working R installation.
-Seurat object creation requires [Seurat installed](https://satijalab.org/seurat/articles/install.html).
+`parse_rds` is base function that reads rds into python Robj object that has tree-like structure. Robj has two main functions:
+1. `show(level=1)` shows object structure to specified level. 
+2. `get([inx1,key2])` subsets object by keys.
+Each Robj has values that are indexed by integers (shown as `+N` by `show` function) and slotes/attributes that are indexed by keys (shown as `&/*<key>` by `show` function)
