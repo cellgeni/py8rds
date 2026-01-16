@@ -2,7 +2,6 @@ import gzip
 import struct
 import logging
 import pandas as pd
-import scanpy as sc
 import anndata as ad
 from scipy import sparse
 import numpy as np
@@ -418,7 +417,7 @@ def parse_object(reader,rds: RdsFile):
             # This REFSXP is not a pooled symbol (e.g. environment, other object),
             # and we don’t currently maintain a full reference table. To keep
             # parsing robust and avoid crashes, we return a placeholder.
-            logging.warning(
+            logging.debug(
                 f"REFSXP index {inx} out of rds.symbols range (len={len(rds.symbols)}); "
                 "treating as opaque reference placeholder"
             )
@@ -1131,7 +1130,9 @@ def as_data_frame(robj):
     cols[names[i]] = val
     
   r = pd.DataFrame(cols)
-  r.index = robj.get('row.names').value
+  row_names = robj.get('row.names')
+  if row_names is not None:
+    r.index = row_names.value
   return r
 
 def as_numpy(robj):
@@ -1193,7 +1194,18 @@ def as_anndata(robj):
     if dimnames[1].value is not None:
       adata.obs_names = dimnames[1].value
   return adata
+
+def as_dict(robj):
+    """
+    Converts toplevel Robj to dict.
+    Expects that robj has `names` slot of same length as number of values
     
+    Doesn't pay any attention to lower level objects (so thy can still be Robj).
+    """
+    names = robj.get('names').value
+    r = {names[i]:robj.get(i).value for i in range(len(names))}
+    return r
+
 def seurat2adata(robj,assay=0,layer='counts'):
   """
   Converts Seurat Robj into anndata
@@ -1245,6 +1257,61 @@ def seurat2adata(robj,assay=0,layer='counts'):
     for i in range(len(rdims_names)):
       adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i,'cell.embeddings']))
   
+  return adata
+
+def seurat2adata_spatial(robj,assay=0,layer='counts'):
+  """
+  Converts Visium Seurat Robj into spatial anndata.
+  It loads:
+  1. specified assay/layer as data
+  2. cell metadata
+  3. var metadata if any
+  4. spatial coordinates into adata.obsm['spatial']
+  5. spatial metadata into adata.uns['spatial']
+
+  Parameters
+  ----------
+  robj : Robj or str (path 2 rds file)
+  assay : int - assay index
+  layer : str - named of layer to use
+
+  Returns
+  -------
+  AnnData
+  """
+  if isinstance(robj,str):
+    robj = parse_rds(robj)
+  adata = seurat2adata(robj,assay=assay,layer=layer)
+
+  images = robj.get('images')
+  if images is None: # not spatial
+    return adata
+
+  img_names = images.get('names').value.tolist()
+
+  spatial_uns = {}
+  spatial_coords = None
+  for i, name in enumerate(img_names):
+    img_obj = images.get(i)
+    img = as_numpy(img_obj.get('image'))
+    coords = as_data_frame(img_obj.get('coordinates'))
+    spatial_coords = pd.concat([spatial_coords,coords],axis=0)
+
+    scalefactors = as_dict(img_obj.get('scale.factors'))
+    scalefactors = {
+        'fiducial_diameter_fullres': scalefactors['fiducial'][0],
+        'spot_diameter_fullres': scalefactors['fiducial'][0] * 0.55, # Seurat messed up spot sizes, but this looks about right
+        'tissue_hires_scalef': scalefactors['hires'][0], 
+        'tissue_lowres_scalef': scalefactors['lowres'][0]
+    }
+    spatial_uns[name] = { 
+        'images' :{'lowres' : img}, # Seurat uses lowres by default
+        'scalefactors' : scalefactors
+    }
+  
+  if spatial_uns:
+    adata.uns['spatial'] = spatial_uns
+  adata.obsm['spatial'] = spatial_coords.loc[adata.obs_names,['imagecol','imagerow']].to_numpy()
   return adata
 
 def _array2numpy(robj):

@@ -17,6 +17,16 @@ classifiers = [
     "Operating System :: OS Independent",
     "Development Status :: 2 - Pre-Alpha"
 ]
+dependencies = [
+    "gzip",
+    "struct",
+    "logging",
+    "pandas",
+    "scanpy",
+    "anndata",
+    "scipy",
+    "numpy",
+]
 
 [project.urls]
 Homepage = "https://github.com/cellgeni/py8rds"
