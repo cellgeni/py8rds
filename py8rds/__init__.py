@@ -345,6 +345,10 @@ def parse_object(reader,rds: RdsFile):
         logging.debug(f">> STRSXP")
         robj.value = parse_STRSXP(reader,rds)
 
+    elif header["sexptype"] == "CPLXSXP":
+        logging.debug(f">> CPLXSXP")
+        robj.value = parse_CPLXSXP(reader)
+
     elif header["sexptype"] == "REALSXP":
         logging.debug(f">> REALSXP")
         robj.value = parse_REALSXP(reader)
@@ -357,14 +361,33 @@ def parse_object(reader,rds: RdsFile):
         logging.debug(f">> BUILTINSXP")
         robj.value = parse_BUILTINSXP(reader)
 
+    elif header["sexptype"] == "SPECIALSXP":
+        logging.debug(f">> SPECIALSXP")
+        robj.value = parse_SPECIALSXP(reader)
+
     elif header["sexptype"] == "VECSXP":
         logging.debug(f">> VECSXP")
         robj.value = parse_VECSXP(reader,rds)
+
+    elif header["sexptype"] == "EXPRSXP":
+        logging.debug(f">> EXPRSXP")
+        robj.value = parse_EXPRSXP(reader,rds)
 
     elif header["sexptype"] == "CLOSXP":
         logging.debug(f">> CLOSXP")
         robj.value = parse_CLOSXP(reader,rds,header["flags"]["attributes"])
     
+    elif header["sexptype"] == "PROMSXP":
+        logging.debug(f">> PROMSXP")
+        attrs = None
+        if header["flags"]["attributes"]:
+            logging.debug("---> start of PROMSXP attributes")
+            attrs = parse_object(reader,rds).value
+            logging.debug("<--- end of PROMSXP attributes")
+        robj.value = parse_PROMSXP(reader,rds, header["flags"]["tag"])
+        if attrs is not None:
+            robj.attributes = attrs
+
     elif header["sexptype"] == "ENVSXP":
         logging.debug(f">> ENVSXP")
         robj.value = parse_ENVSXP(reader,rds)
@@ -409,6 +432,25 @@ def parse_object(reader,rds: RdsFile):
       robj.value = val
       if attrs is not None:
           robj.attributes = attrs
+    elif header["sexptype"] == "RAWSXP":
+      logging.debug(">> RAWSXP")
+      robj.value = parse_RAWSXP(reader)
+    elif header["sexptype"] == "DOTSXP":
+      logging.debug(">> DOTSXP")
+      attrs = None
+      if header["flags"]["attributes"]:
+          logging.debug("---> start of DOTSXP attributes")
+          attrs = parse_object(reader,rds).value
+          logging.debug("<--- end of DOTSXP attributes")
+      robj.value = parse_DOTSXP(reader,rds, header["flags"]["tag"])
+      if attrs is not None:
+          robj.attributes = attrs
+    elif header["sexptype"] == "WEAKREFSXP":
+      logging.debug(">> WEAKREFSXP")
+      robj.value = parse_WEAKREFSXP(reader,rds)
+    elif header["sexptype"] == "ANYSXP":
+      logging.debug(">> ANYSXP")
+      robj.value = parse_ANYSXP(reader,rds)
           
     else:
       raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
@@ -416,7 +458,7 @@ def parse_object(reader,rds: RdsFile):
     logging.debug(header)
     # S4 fields are stored as attribures (pairlist), so attr flag is true, but we will store them as data.
     # so at this point for S4 we've already read attributes
-    if header["flags"]["attributes"] and header["sexptype"] not in ('S4SXP','ENVSXP','CLOSXP', 'LISTSXP', 'LANGSXP','ALTREP','NAMESPACESXP','EXTPTRSXP'):
+    if header["flags"]["attributes"] and header["sexptype"] not in ('S4SXP','ENVSXP','CLOSXP', 'LISTSXP', 'LANGSXP','ALTREP','NAMESPACESXP','EXTPTRSXP','PROMSXP','DOTSXP'):
         logging.debug("---> start of object attributes")
         attributes = parse_object(reader,rds).value
         if attributes is not None:
@@ -613,6 +655,16 @@ def parse_STRSXP(reader,rds):
     return value
 
 
+def parse_CPLXSXP(reader):
+    size = struct.unpack(">I", reader.read(4))[0]
+    logging.debug(f"size       {size}")
+    value = np.zeros(size, dtype=np.complex128)
+    for i in range(size):
+        real = struct.unpack(">d", reader.read(8))[0]
+        imag = struct.unpack(">d", reader.read(8))[0]
+        value[i] = complex(real, imag)
+    return value
+
 def parse_REALSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
@@ -639,6 +691,10 @@ def parse_BUILTINSXP(reader):
     return value
 
 
+def parse_SPECIALSXP(reader):
+    return parse_BUILTINSXP(reader)
+
+
 def parse_LGLSXP(reader):
     # logical are stored as integers 
     value = parse_INTSXP(reader)
@@ -653,6 +709,50 @@ def parse_VECSXP(reader,rds):
         logging.debug(f"VECSXP: {_}/{size}")
         value.append(parse_object(reader,rds))
     return value
+
+
+def parse_EXPRSXP(reader,rds):
+    return parse_VECSXP(reader,rds)
+
+
+def parse_RAWSXP(reader):
+    size = struct.unpack(">I", reader.read(4))[0]
+    logging.debug(f"size       {size}")
+    raw = reader.read(size)
+    return np.frombuffer(raw, dtype=np.uint8)
+
+
+def parse_DOTSXP(reader,rds, has_tag):
+    return parse_LISTSXP(reader, rds, has_tag)
+
+
+def parse_PROMSXP(reader,rds, has_tag):
+    """
+    Parse an R promise (PROMSXP). R serializes it like a dotted pair:
+    TAG = env, CAR = value, CDR = expr.
+    """
+    env = parse_object(reader,rds) if has_tag else None
+    value = parse_object(reader,rds)
+    expr = parse_object(reader,rds)
+    return [
+        ["env", env],
+        ["value", value],
+        ["expr", expr],
+    ]
+
+
+def parse_WEAKREFSXP(reader,rds):
+    """
+    Weak references are serialized without payload; keep a placeholder.
+    """
+    return None
+
+
+def parse_ANYSXP(reader,rds):
+    """
+    ANYSXP is a rarely serialized placeholder; treat as NULL.
+    """
+    return None
 
 
 def parse_ENVSXP(reader,rds):
