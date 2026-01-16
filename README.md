@@ -11,7 +11,7 @@
 
 Use pip to install directly from the repo
 ```bash
-pip install git+hhttps://github.com/cellgeni/py8rds.git
+pip install git+https://github.com/cellgeni/py8rds.git
 ```
 
 ## Usage
