@@ -667,19 +667,13 @@ def parse_CPLXSXP(reader):
 def parse_REALSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = np.zeros(size, dtype=np.float64)
-    for i in range(size):
-        value[i] = struct.unpack(">d", reader.read(8))[0]
+    value = np.frombuffer(reader.read(size * 8), dtype=">f8").astype(np.float64, copy=False)
     return value
-
 
 def parse_INTSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = np.zeros(size, dtype=np.int32)
-    for i in range(size):
-        # -2147483648 is NA but there is no nans in int32 so we just ignore it...
-        value[i] = struct.unpack(">i", reader.read(4))[0]
+    value = np.frombuffer(reader.read(size * 4), dtype=">i4").astype(np.int32, copy=False)
     return value
 
 
@@ -696,8 +690,8 @@ def parse_SPECIALSXP(reader):
 
 def parse_LGLSXP(reader):
     # logical are stored as integers 
-    value = parse_INTSXP(reader)
-    return [v == 1 if v!= None else v for v in value]
+    value = parse_INTSXP(reader) == 1
+    return value
 
 
 def parse_VECSXP(reader,rds):
