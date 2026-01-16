@@ -150,7 +150,8 @@ class Robj:
       if level < 0:
         return ""
       level -= 1
-      result = indent + name + '('+str(self.getClass())+"): "
+      parts = []
+      parts.append(indent + name + '('+str(self.getClass())+"): ")
       indent = indent.replace('+','|').replace('*','|').replace('&','|')
       # value
       values = self.value
@@ -160,53 +161,53 @@ class Robj:
       handled_values = False
       if values_is_array:
         if values.size == 0:
-          result += '[]\n'
+          parts.append('[]\n')
           handled_values = True
         else:
           first_val = values.flat[0]
           if self.is_primitive(first_val):
-            result += '['
+            parts.append('[')
             preview_count = min(3, values.size)
-            result += ','.join([str(values.flat[i]) for i in range(preview_count)])
+            parts.append(','.join([str(values.flat[i]) for i in range(preview_count)]))
             if values.size > 3:
-              result += ',...'
-            result += ']'
+              parts.append(',...')
+            parts.append(']')
             if values.ndim > 1:
-              result += f' shape={values.shape}'
-            result += '\n'
+              parts.append(f' shape={values.shape}')
+            parts.append('\n')
             handled_values = True
           else:
             values = values.tolist()
             values_is_array = False
       if not handled_values:
         if len(values) == 0:
-          result += '[]\n'
+          parts.append('[]\n')
         elif self.is_primitive(values[0]):
-          result += '['
-          result += ','.join([str(v) for v in values[:min(3,len(values))]])
+          parts.append('[')
+          parts.append(','.join([str(v) for v in values[:min(3,len(values))]]))
           if len(values) > 3:
-            result += ',...'
-          result += ']\n'
+            parts.append(',...')
+          parts.append(']\n')
         elif isinstance(values[0],Robj):
-          result += "\n"
+          parts.append("\n")
           for i in range(len(values)):
-            result += values[i].toString(name=str(i),indent=indent+"+",maxItems=maxItems,level=level)
+            parts.append(values[i].toString(name=str(i),indent=indent+"+",maxItems=maxItems,level=level))
         else:
-          result += "\n"
+          parts.append("\n")
           for i in range(len(values)):
             if self.is_primitive(values[i]):
-              result += indent+"&" + str(values[i]) +"\n"
+              parts.append(indent+"&" + str(values[i]) +"\n")
             elif isinstance(values[i][1],Robj):
-              result += values[i][1].toString(name=str(values[i][0]),indent=indent+"&",maxItems=maxItems,level=level)
+              parts.append(values[i][1].toString(name=str(values[i][0]),indent=indent+"&",maxItems=maxItems,level=level))
             else:
-              result += indent+"&"+str(values[i][0])+":"+str(values[i][1])+"\n"
+              parts.append(indent+"&"+str(values[i][0])+":"+str(values[i][1])+"\n")
       # attributes
       for a in self.attributes:
         if len(a) != 2:
           raise RuntimeError("Atributes are not in pair:"+str(a))
         if a[0] != 'sexptype':
-          result += a[1].toString(name=str(a[0]),indent=indent+"*",maxItems=maxItems,level=level)
-      return result
+          parts.append(a[1].toString(name=str(a[0]),indent=indent+"*",maxItems=maxItems,level=level))
+      return "".join(parts)
 
 def parse_object_header(reader):
     logging.debug(f"---> start of object header (0x{reader.tell():02X})")
