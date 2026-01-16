@@ -1217,8 +1217,11 @@ def seurat2adata(robj,assay=0,layer='counts'):
   # try Assay5
   else:
     names = robj.get(['assays',assay,'layers','names']).value
-    layer = np.where(names == layer)[0]
-    cnts  = robj.get(['assays',assay,'layers',layer])
+    layer_idx = np.where(names == layer)[0]
+    if layer_idx.size == 0:
+      raise ValueError(f"Layer '{layer}' not found in assay {assay}.")
+    layer_idx = int(layer_idx[0])
+    cnts  = robj.get(['assays',assay,'layers',layer_idx])
     adata = as_anndata(cnts)
     adata.var_names = robj.get(['assays',0,'features','dimnames',0]).value
     adata.obs = obs
