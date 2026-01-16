@@ -1104,7 +1104,8 @@ def as_data_frame(robj):
 
   Parameters
   ----------
-  robj : Robj
+  robj : Robj | str
+      Robj or path to an RDS file.
 
   Returns
   -------
@@ -1113,7 +1114,10 @@ def as_data_frame(robj):
   Examples
   --------
   as_data_frame(robj)
+  as_data_frame("data.rds")
   """
+  if isinstance(robj, str):
+    robj = parse_rds(robj)
   cols = {}
   names = robj.get('names').value
   for i in range(len(names)):
@@ -1136,7 +1140,8 @@ def as_numpy(robj):
   
   Parameters
   ----------
-  robj : Robj
+  robj : Robj | str
+      Robj or path to an RDS file.
 
   Returns
   -------
@@ -1145,7 +1150,10 @@ def as_numpy(robj):
   Examples
   --------
   as_numpy(robj)
+  as_numpy("data.rds")
   """
+  if isinstance(robj, str):
+    robj = parse_rds(robj)
   cl = robj.getClass()
   if cl == 'dgCMatrix':
     return _dgCMatrix2numpy(robj)
@@ -1158,7 +1166,8 @@ def as_anndata(robj):
   
   Parameters
   ----------
-  robj : Robj
+  robj : Robj | str
+      Robj or path to an RDS file.
 
   Returns
   -------
@@ -1167,7 +1176,10 @@ def as_anndata(robj):
   Examples
   --------
   as_anndata(robj)
+  as_anndata("data.rds")
   """
+  if isinstance(robj, str):
+    robj = parse_rds(robj)
   X = as_numpy(robj).T
   adata = ad.AnnData(X=X)
   dimnames = robj.get('dimnames')
