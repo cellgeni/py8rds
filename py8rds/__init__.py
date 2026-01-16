@@ -141,7 +141,7 @@ class Robj:
       return r
       
     def is_primitive(self,x):
-      return isinstance(x, (int, float, bool, str, bytes, type(None)))
+      return isinstance(x, (int, float, bool, str, bytes, type(None), np.generic))
     
     def show(self,level=1):
       print(self.toString(level=level))
@@ -154,29 +154,52 @@ class Robj:
       indent = indent.replace('+','|').replace('*','|').replace('&','|')
       # value
       values = self.value
-      if (not isinstance(values,list)) and (not isinstance(values, np.ndarray)) :
+      values_is_array = isinstance(values, np.ndarray)
+      if (not isinstance(values,list)) and (not values_is_array) :
         values = [values]
-      if len(values) == 0:
-        result += '[]\n'
-      elif self.is_primitive(values[0]):
-        result += '['
-        result += ','.join([str(v) for v in values[:min(3,len(values))]])
-        if len(values) > 3:
-          result += ',...'
-        result += ']\n'
-      elif isinstance(values[0],Robj):
-        result += "\n"
-        for i in range(len(values)):
-          result += values[i].toString(name=str(i),indent=indent+"+",maxItems=maxItems,level=level)
-      else:
-        result += "\n"
-        for i in range(len(values)):
-          if self.is_primitive(values[i]):
-            result += indent+"&" + str(values[i]) +"\n"
-          elif isinstance(values[i][1],Robj):
-            result += values[i][1].toString(name=str(values[i][0]),indent=indent+"&",maxItems=maxItems,level=level)
+      handled_values = False
+      if values_is_array:
+        if values.size == 0:
+          result += '[]\n'
+          handled_values = True
+        else:
+          first_val = values.flat[0]
+          if self.is_primitive(first_val):
+            result += '['
+            preview_count = min(3, values.size)
+            result += ','.join([str(values.flat[i]) for i in range(preview_count)])
+            if values.size > 3:
+              result += ',...'
+            result += ']'
+            if values.ndim > 1:
+              result += f' shape={values.shape}'
+            result += '\n'
+            handled_values = True
           else:
-            result += indent+"&"+str(values[i][0])+":"+str(values[i][1])+"\n"
+            values = values.tolist()
+            values_is_array = False
+      if not handled_values:
+        if len(values) == 0:
+          result += '[]\n'
+        elif self.is_primitive(values[0]):
+          result += '['
+          result += ','.join([str(v) for v in values[:min(3,len(values))]])
+          if len(values) > 3:
+            result += ',...'
+          result += ']\n'
+        elif isinstance(values[0],Robj):
+          result += "\n"
+          for i in range(len(values)):
+            result += values[i].toString(name=str(i),indent=indent+"+",maxItems=maxItems,level=level)
+        else:
+          result += "\n"
+          for i in range(len(values)):
+            if self.is_primitive(values[i]):
+              result += indent+"&" + str(values[i]) +"\n"
+            elif isinstance(values[i][1],Robj):
+              result += values[i][1].toString(name=str(values[i][0]),indent=indent+"&",maxItems=maxItems,level=level)
+            else:
+              result += indent+"&"+str(values[i][0])+":"+str(values[i][1])+"\n"
       # attributes
       for a in self.attributes:
         if len(a) != 2:
