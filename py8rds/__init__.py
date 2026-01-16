@@ -6,6 +6,7 @@ import scanpy as sc
 import anndata as ad
 from scipy import sparse
 import numpy as np
+from numpy.dtypes import StringDType
 
 __version__ = "0.0.1"
 
@@ -153,7 +154,7 @@ class Robj:
       indent = indent.replace('+','|').replace('*','|').replace('&','|')
       # value
       values = self.value
-      if not isinstance(values,list):
+      if (not isinstance(values,list)) and (not isinstance(values, np.ndarray)) :
         values = [values]
       if len(values) == 0:
         result += '[]\n'
@@ -581,28 +582,29 @@ def parse_CHARSXP(reader):
 def parse_STRSXP(reader,rds):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = []
-    for _ in range(size):
-        value.append(parse_object(reader,rds).value)
+    value = np.empty(size, dtype=StringDType())
+
+    for i in range(size):
+        value[i] = parse_object(reader,rds).value
     return value
 
 
 def parse_REALSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = []
-    for _ in range(size):
-        value.append(struct.unpack(">d", reader.read(8))[0])
+    value = np.zeros(size, dtype=np.float64)
+    for i in range(size):
+        value[i] = struct.unpack(">d", reader.read(8))[0]
     return value
 
 
 def parse_INTSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = []
-    for _ in range(size):
-        value.append(struct.unpack(">i", reader.read(4))[0])
-    value = [x if x != -2147483648 else None for x in value] # -2147483648 is NA
+    value = np.zeros(size, dtype=np.int32)
+    for i in range(size):
+        # -2147483648 is NA but there is no nans in int32 so we just ignore it...
+        value[i] = struct.unpack(">i", reader.read(4))[0]
     return value
 
 
@@ -1091,7 +1093,7 @@ def seurat2adata(robj,assay=0,layer='counts'):
   # try Assay5
   else:
     names = robj.get(['assays',assay,'layers','names']).value
-    layer = names.index(layer)
+    layer = np.where(names == layer)[0]
     cnts  = robj.get(['assays',assay,'layers',layer])
     adata = as_anndata(cnts)
     adata.var_names = robj.get(['assays',0,'features','dimnames',0]).value
