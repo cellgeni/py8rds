@@ -19,7 +19,6 @@ classifiers = [
 ]
 dependencies = [
     "pandas",
-    "scanpy",
     "anndata",
     "scipy",
     "numpy",

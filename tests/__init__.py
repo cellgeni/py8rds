@@ -11,8 +11,13 @@ class TestRdsParser(unittest.TestCase):
     def setUp(self):
         # Create a temporary directory
         self.test_dir = tempfile.mkdtemp()
-        create_test_data_script_src = os.path.join(os.path.dirname(os.path.realpath(__file__)), "create_test_data.R")
-        shutil.copy(create_test_data_script_src, os.path.join(self.test_dir, "create_test_data.R"))
+        create_test_data_script_src = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), "create_test_data.R"
+        )
+        shutil.copy(
+            create_test_data_script_src,
+            os.path.join(self.test_dir, "create_test_data.R"),
+        )
         process = subprocess.run(
             ["Rscript", "create_test_data.R"],
             cwd=self.test_dir,
@@ -54,7 +59,11 @@ class TestRdsParser(unittest.TestCase):
     def test_data_frame(self):
         data_frame = os.path.join(self.test_dir, "data.frame.rds")
         result = rdd.parse_rds(data_frame)
-        expected = {"CharVec": ["a", "b", "c"], "NumVec": [1, 2, 3], "BoolVec": [True, False, True]}
+        expected = {
+            "CharVec": ["a", "b", "c"],
+            "NumVec": [1, 2, 3],
+            "BoolVec": [True, False, True],
+        }
         self.assertEqual(result.values, {""})
 
 

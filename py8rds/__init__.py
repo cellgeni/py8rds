@@ -10,7 +10,7 @@ from numpy.dtypes import StringDType
 __version__ = "0.0.1"
 
 logging.basicConfig(level="DEBUG", format="[%(asctime)s][%(levelname)s] %(message)s")
-logging.getLogger().setLevel('INFO')
+logging.getLogger().setLevel("INFO")
 
 # REFERENCES:
 # https://cran.r-project.org/doc/manuals/r-release/R-ints.html#Serialization-Formats
@@ -43,14 +43,15 @@ SEXPTYPEs = {
     23: {"SEXPTYPE": "WEAKREFSXP", "description": "weak"},
     24: {"SEXPTYPE": "RAWSXP", "description": "reference raw vector"},
     25: {"SEXPTYPE": "S4SXP", "description": "S4 classes"},
-    238: {"SEXPTYPE": "ALTREP", "description": "ALTREP_SXP / custom ALTREP"}, 
+    238: {"SEXPTYPE": "ALTREP", "description": "ALTREP_SXP / custom ALTREP"},
     242: {"SEXPTYPE": "EMPTYENV", "description": "NULL"},
     249: {"SEXPTYPE": "NAMESPACESXP", "description": "NULL"},
     251: {"SEXPTYPE": "MISSINGARG", "description": "NULL"},
     253: {"SEXPTYPE": "GLOBALENV", "description": "NULL"},
     254: {"SEXPTYPE": "NILSXP", "description": "NULL"},
-    255: {"SEXPTYPE": "REFSXP", "description": "reference to previous object"}, 
+    255: {"SEXPTYPE": "REFSXP", "description": "reference to previous object"},
 }
+
 
 class RdsFile:
     def __init__(self):
@@ -62,21 +63,20 @@ class RdsFile:
         self.environments = []
         self.symbols = []
         self.external_pointers = []
-        
+
 
 class Robj:
     def __init__(self):
         # can be: Robj or list of scalars or Robjs or list of [scalar,Robj] pairs/Nones
         self.value = None
-        # attributes has unique names and then can be stored in dict, but they are serialized as pairlist which names are not necessary unique. 
+        # attributes has unique names and then can be stored in dict, but they are serialized as pairlist which names are not necessary unique.
         # So we will store attributes as list of [scalar,Robj] pairs
         self.attributes = []
-    
-    
-    def get(self,inxs):
-      """
+
+    def get(self, inxs):
+        """
         Recursively navigate into an Robj using indices and/or names.
-        Indeces are used to only search in value, names are used to search both in attributes (first) 
+        Indeces are used to only search in value, names are used to search both in attributes (first)
         and then in values if they are paired list (should be the case for S4 slots)
 
         Parameters
@@ -100,113 +100,144 @@ class Robj:
         >>> robj.get(["a", 1])
         2
         """
-      if not isinstance(inxs,list):
-        inxs = [inxs]
-      r = self._get(inxs[0])
-      if (r is None) or (len(inxs) == 1):
-        return r
-      return r.get(inxs[1:])
-    
-    def _get(self,inx):
-      # look by index
-      if isinstance(inx,int):
-        if isinstance(self.value,list):
-          return self.value[inx]
-        elif inx == 0:
-          return self.value
-        else:
-          return None
-      # look by name
-      elif isinstance(inx,str):
-        # in attributes
-        for a in self.attributes:
-          if inx == a[0]:
-            return a[1]
-        # in values
-        if not isinstance(self.value,list):
-          return None
-        for v in self.value:
-          if isinstance(v,list):
-            if inx == v[0]:
-              return v[1]
-      return None
-    
-    def getClass(self):
-      r = self._get('class')
-      if r is None:
-        r = self._get('sexptype')
-      else:
-        r = ','.join(r.value)
-      return r
-      
-    def is_primitive(self,x):
-      return isinstance(x, (int, float, bool, str, bytes, type(None), np.generic))
-    
-    def show(self,level=1):
-      print(self.toString(level=level))
-    
-    def toString(self,name='Robj',indent='',maxItems=5,level=1e3):
-      if level < 0:
-        return ""
-      level -= 1
-      parts = []
-      parts.append(indent + name + '('+str(self.getClass())+"): ")
-      indent = indent.replace('+','|').replace('*','|').replace('&','|')
-      # value
-      values = self.value
-      values_is_array = isinstance(values, np.ndarray)
-      if (not isinstance(values,list)) and (not values_is_array) :
-        values = [values]
-      handled_values = False
-      if values_is_array:
-        if values.size == 0:
-          parts.append('[]\n')
-          handled_values = True
-        else:
-          first_val = values.flat[0]
-          if self.is_primitive(first_val):
-            parts.append('[')
-            preview_count = min(3, values.size)
-            parts.append(','.join([str(values.flat[i]) for i in range(preview_count)]))
-            if values.size > 3:
-              parts.append(',...')
-            parts.append(']')
-            if values.ndim > 1:
-              parts.append(f' shape={values.shape}')
-            parts.append('\n')
-            handled_values = True
-          else:
-            values = values.tolist()
-            values_is_array = False
-      if not handled_values:
-        if len(values) == 0:
-          parts.append('[]\n')
-        elif self.is_primitive(values[0]):
-          parts.append('[')
-          parts.append(','.join([str(v) for v in values[:min(3,len(values))]]))
-          if len(values) > 3:
-            parts.append(',...')
-          parts.append(']\n')
-        elif isinstance(values[0],Robj):
-          parts.append("\n")
-          for i in range(len(values)):
-            parts.append(values[i].toString(name=str(i),indent=indent+"+",maxItems=maxItems,level=level))
-        else:
-          parts.append("\n")
-          for i in range(len(values)):
-            if self.is_primitive(values[i]):
-              parts.append(indent+"&" + str(values[i]) +"\n")
-            elif isinstance(values[i][1],Robj):
-              parts.append(values[i][1].toString(name=str(values[i][0]),indent=indent+"&",maxItems=maxItems,level=level))
+        if not isinstance(inxs, list):
+            inxs = [inxs]
+        r = self._get(inxs[0])
+        if (r is None) or (len(inxs) == 1):
+            return r
+        return r.get(inxs[1:])
+
+    def _get(self, inx):
+        # look by index
+        if isinstance(inx, int):
+            if isinstance(self.value, list):
+                return self.value[inx]
+            elif inx == 0:
+                return self.value
             else:
-              parts.append(indent+"&"+str(values[i][0])+":"+str(values[i][1])+"\n")
-      # attributes
-      for a in self.attributes:
-        if len(a) != 2:
-          raise RuntimeError("Atributes are not in pair:"+str(a))
-        if a[0] != 'sexptype':
-          parts.append(a[1].toString(name=str(a[0]),indent=indent+"*",maxItems=maxItems,level=level))
-      return "".join(parts)
+                return None
+        # look by name
+        elif isinstance(inx, str):
+            # in attributes
+            for a in self.attributes:
+                if inx == a[0]:
+                    return a[1]
+            # in values
+            if not isinstance(self.value, list):
+                return None
+            for v in self.value:
+                if isinstance(v, list):
+                    if inx == v[0]:
+                        return v[1]
+        return None
+
+    def getClass(self):
+        r = self._get("class")
+        if r is None:
+            r = self._get("sexptype")
+        else:
+            r = ",".join(r.value)
+        return r
+
+    def is_primitive(self, x):
+        return isinstance(x, (int, float, bool, str, bytes, type(None), np.generic))
+
+    def show(self, level=1):
+        print(self.toString(level=level))
+
+    def toString(self, name="Robj", indent="", maxItems=5, level=1e3):
+        if level < 0:
+            return ""
+        level -= 1
+        parts = []
+        parts.append(indent + name + "(" + str(self.getClass()) + "): ")
+        indent = indent.replace("+", "|").replace("*", "|").replace("&", "|")
+        # value
+        values = self.value
+        values_is_array = isinstance(values, np.ndarray)
+        if (not isinstance(values, list)) and (not values_is_array):
+            values = [values]
+        handled_values = False
+        if values_is_array:
+            if values.size == 0:
+                parts.append("[]\n")
+                handled_values = True
+            else:
+                first_val = values.flat[0]
+                if self.is_primitive(first_val):
+                    parts.append("[")
+                    preview_count = min(3, values.size)
+                    parts.append(
+                        ",".join([str(values.flat[i]) for i in range(preview_count)])
+                    )
+                    if values.size > 3:
+                        parts.append(",...")
+                    parts.append("]")
+                    if values.ndim > 1:
+                        parts.append(f" shape={values.shape}")
+                    parts.append("\n")
+                    handled_values = True
+                else:
+                    values = values.tolist()
+                    values_is_array = False
+        if not handled_values:
+            if len(values) == 0:
+                parts.append("[]\n")
+            elif self.is_primitive(values[0]):
+                parts.append("[")
+                parts.append(",".join([str(v) for v in values[: min(3, len(values))]]))
+                if len(values) > 3:
+                    parts.append(",...")
+                parts.append("]\n")
+            elif isinstance(values[0], Robj):
+                parts.append("\n")
+                for i in range(len(values)):
+                    parts.append(
+                        values[i].toString(
+                            name=str(i),
+                            indent=indent + "+",
+                            maxItems=maxItems,
+                            level=level,
+                        )
+                    )
+            else:
+                parts.append("\n")
+                for i in range(len(values)):
+                    if self.is_primitive(values[i]):
+                        parts.append(indent + "&" + str(values[i]) + "\n")
+                    elif isinstance(values[i][1], Robj):
+                        parts.append(
+                            values[i][1].toString(
+                                name=str(values[i][0]),
+                                indent=indent + "&",
+                                maxItems=maxItems,
+                                level=level,
+                            )
+                        )
+                    else:
+                        parts.append(
+                            indent
+                            + "&"
+                            + str(values[i][0])
+                            + ":"
+                            + str(values[i][1])
+                            + "\n"
+                        )
+        # attributes
+        for a in self.attributes:
+            if len(a) != 2:
+                raise RuntimeError("Atributes are not in pair:" + str(a))
+            if a[0] != "sexptype":
+                parts.append(
+                    a[1].toString(
+                        name=str(a[0]),
+                        indent=indent + "*",
+                        maxItems=maxItems,
+                        level=level,
+                    )
+                )
+        return "".join(parts)
+
 
 def parse_object_header(reader):
     logging.debug(f"---> start of object header (0x{reader.tell():02X})")
@@ -215,7 +246,7 @@ def parse_object_header(reader):
     if any(len(b) == 0 for b in object_header):
         raise EOFError("Unexpected end of file while reading object header")
 
-    header_bin = [f"{struct.unpack('>B',b)[0]:08b}" for b in object_header]
+    header_bin = [f"{struct.unpack('>B', b)[0]:08b}" for b in object_header]
     logging.debug(f"header {header_bin}")
 
     sexp_type = struct.unpack("<B", object_header[3])[0]  # bit 0-7
@@ -242,7 +273,10 @@ def parse_object_header(reader):
         "sexptype": SEXPTYPEs[sexp_type]["SEXPTYPE"] if sexp_type in SEXPTYPEs else -1,
         "flags": {
             "object": object_bit,
-            "attributes": attributes_bit & (sexp_type < 255),  # sexp_type==255 is symbol, symbol has no attributes (I hope), but have seqpool index in preceeding bytes
+            "attributes": attributes_bit
+            & (
+                sexp_type < 255
+            ),  # sexp_type==255 is symbol, symbol has no attributes (I hope), but have seqpool index in preceeding bytes
             "tag": tag_bit,
             "gp": gp_bit,
         },
@@ -278,12 +312,12 @@ def parse_rds(file_path: str) -> Robj:
 
     rds.writer_version = struct.unpack("BBB", reader.read(4)[1:])
     logging.debug(
-        f"version of R which wrote the file: {'.'.join(map(str,rds.writer_version))}"
+        f"version of R which wrote the file: {'.'.join(map(str, rds.writer_version))}"
     )
 
     rds.reader_version = struct.unpack("BBB", reader.read(4)[1:])
     logging.debug(
-        f"minimal version of R needed to read the format: {'.'.join(map(str,rds.reader_version))}"
+        f"minimal version of R needed to read the format: {'.'.join(map(str, rds.reader_version))}"
     )
 
     if rds.format_version == 3:
@@ -293,16 +327,17 @@ def parse_rds(file_path: str) -> Robj:
 
     logging.debug("<--- end of file header")
 
-    rds.object = parse_object(reader,rds)
+    rds.object = parse_object(reader, rds)
     logging.info(f"Done reading {file_path}")
     return rds.object
 
-def parse_object(reader,rds: RdsFile):
+
+def parse_object(reader, rds: RdsFile):
     header = parse_object_header(reader)
     robj = Robj()
     if header["sexptype"] == "S4SXP":
         logging.debug(f">> S4SXP")
-        robj = parse_S4SXP(reader,rds)
+        robj = parse_S4SXP(reader, rds)
 
     elif header["sexptype"] == "LISTSXP":
         logging.debug(">> LISTSXP")
@@ -312,7 +347,7 @@ def parse_object(reader,rds: RdsFile):
             logging.debug("---> start of LISTSXP attributes")
             attrs = parse_object(reader).value
             logging.debug("<--- end of LISTSXP attributes")
-        robj.value = parse_LISTSXP(reader,rds, header["flags"]["tag"])
+        robj.value = parse_LISTSXP(reader, rds, header["flags"]["tag"])
         if attrs is not None:
             robj.attributes = attrs
 
@@ -322,7 +357,7 @@ def parse_object(reader,rds: RdsFile):
         attrs = None
         if header["flags"]["attributes"]:
             logging.debug("---> start of LANGSXP attributes")
-            attrs = parse_object(reader,rds).value
+            attrs = parse_object(reader, rds).value
             logging.debug("<--- end of LANGSXP attributes")
         robj.value = parse_LISTSXP(reader, rds, header["flags"]["tag"])
         if attrs is not None:
@@ -330,7 +365,7 @@ def parse_object(reader,rds: RdsFile):
 
     elif header["sexptype"] == "SYMSXP":
         logging.debug(f">> SYMSXP expecting CHARSXP after")
-        robj.value = parse_SYMSXP(reader,rds)
+        robj.value = parse_SYMSXP(reader, rds)
 
     elif header["sexptype"] == "CHARSXP":
         logging.debug(f">> CHARSXP")
@@ -342,7 +377,7 @@ def parse_object(reader,rds: RdsFile):
 
     elif header["sexptype"] == "STRSXP":
         logging.debug(f">> STRSXP")
-        robj.value = parse_STRSXP(reader,rds)
+        robj.value = parse_STRSXP(reader, rds)
 
     elif header["sexptype"] == "CPLXSXP":
         logging.debug(f">> CPLXSXP")
@@ -366,42 +401,48 @@ def parse_object(reader,rds: RdsFile):
 
     elif header["sexptype"] == "VECSXP":
         logging.debug(f">> VECSXP")
-        robj.value = parse_VECSXP(reader,rds)
+        robj.value = parse_VECSXP(reader, rds)
 
     elif header["sexptype"] == "EXPRSXP":
         logging.debug(f">> EXPRSXP")
-        robj.value = parse_EXPRSXP(reader,rds)
+        robj.value = parse_EXPRSXP(reader, rds)
 
     elif header["sexptype"] == "CLOSXP":
         logging.debug(f">> CLOSXP")
-        robj.value = parse_CLOSXP(reader,rds,header["flags"]["attributes"])
-    
+        robj.value = parse_CLOSXP(reader, rds, header["flags"]["attributes"])
+
     elif header["sexptype"] == "PROMSXP":
         logging.debug(f">> PROMSXP")
         attrs = None
         if header["flags"]["attributes"]:
             logging.debug("---> start of PROMSXP attributes")
-            attrs = parse_object(reader,rds).value
+            attrs = parse_object(reader, rds).value
             logging.debug("<--- end of PROMSXP attributes")
-        robj.value = parse_PROMSXP(reader,rds, header["flags"]["tag"])
+        robj.value = parse_PROMSXP(reader, rds, header["flags"]["tag"])
         if attrs is not None:
             robj.attributes = attrs
 
     elif header["sexptype"] == "ENVSXP":
         logging.debug(f">> ENVSXP")
-        robj.value = parse_ENVSXP(reader,rds)
+        robj.value = parse_ENVSXP(reader, rds)
         rds.symbols.append(robj.value)
-    
+
     elif header["sexptype"] == "BCODESXP":
         logging.debug(">> BCODESXP (bytecode)")
-        robj.value = parse_BCODESXP(reader,rds)
+        robj.value = parse_BCODESXP(reader, rds)
 
-    elif header["sexptype"] in ["NILSXP",'MISSINGARG','GLOBALENV','EMPTYENV','MINUS_ONE']:
+    elif header["sexptype"] in [
+        "NILSXP",
+        "MISSINGARG",
+        "GLOBALENV",
+        "EMPTYENV",
+        "MINUS_ONE",
+    ]:
         robj.value = None
-        
+
     elif header["sexptype"] == "NAMESPACESXP":
         logging.debug(">> NAMESPACESXP")
-        robj.value = parse_NAMESPACESXP(reader,rds)
+        robj.value = parse_NAMESPACESXP(reader, rds)
         rds.symbols.append(robj.value)
     # REFSXP / pooled symbol reference
     elif header["sexptype"] == "REFSXP":
@@ -424,56 +465,69 @@ def parse_object(reader,rds: RdsFile):
             robj.value = f"<REFSXP_{inx}>"
     elif header["sexptype"] == "ALTREP":
         logging.debug(">> ALTREP")
-        robj.value = parse_ALTREP(reader,rds)
+        robj.value = parse_ALTREP(reader, rds)
     elif header["sexptype"] == "EXTPTRSXP":
-      logging.debug(">> EXTPTRSXP")
-      val, attrs = parse_EXTPTRSXP(reader, rds)
-      robj.value = val
-      if attrs is not None:
-          robj.attributes = attrs
+        logging.debug(">> EXTPTRSXP")
+        val, attrs = parse_EXTPTRSXP(reader, rds)
+        robj.value = val
+        if attrs is not None:
+            robj.attributes = attrs
     elif header["sexptype"] == "RAWSXP":
-      logging.debug(">> RAWSXP")
-      robj.value = parse_RAWSXP(reader)
+        logging.debug(">> RAWSXP")
+        robj.value = parse_RAWSXP(reader)
     elif header["sexptype"] == "DOTSXP":
-      logging.debug(">> DOTSXP")
-      attrs = None
-      if header["flags"]["attributes"]:
-          logging.debug("---> start of DOTSXP attributes")
-          attrs = parse_object(reader,rds).value
-          logging.debug("<--- end of DOTSXP attributes")
-      robj.value = parse_DOTSXP(reader,rds, header["flags"]["tag"])
-      if attrs is not None:
-          robj.attributes = attrs
+        logging.debug(">> DOTSXP")
+        attrs = None
+        if header["flags"]["attributes"]:
+            logging.debug("---> start of DOTSXP attributes")
+            attrs = parse_object(reader, rds).value
+            logging.debug("<--- end of DOTSXP attributes")
+        robj.value = parse_DOTSXP(reader, rds, header["flags"]["tag"])
+        if attrs is not None:
+            robj.attributes = attrs
     elif header["sexptype"] == "WEAKREFSXP":
-      logging.debug(">> WEAKREFSXP")
-      robj.value = parse_WEAKREFSXP(reader,rds)
+        logging.debug(">> WEAKREFSXP")
+        robj.value = parse_WEAKREFSXP(reader, rds)
     elif header["sexptype"] == "ANYSXP":
-      logging.debug(">> ANYSXP")
-      robj.value = parse_ANYSXP(reader,rds)
-          
+        logging.debug(">> ANYSXP")
+        robj.value = parse_ANYSXP(reader, rds)
+
     else:
-      raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
+        raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
 
     logging.debug(header)
     # S4 fields are stored as attribures (pairlist), so attr flag is true, but we will store them as data.
     # so at this point for S4 we've already read attributes
-    if header["flags"]["attributes"] and header["sexptype"] not in ('S4SXP','ENVSXP','CLOSXP', 'LISTSXP', 'LANGSXP','ALTREP','NAMESPACESXP','EXTPTRSXP','PROMSXP','DOTSXP'):
+    if header["flags"]["attributes"] and header["sexptype"] not in (
+        "S4SXP",
+        "ENVSXP",
+        "CLOSXP",
+        "LISTSXP",
+        "LANGSXP",
+        "ALTREP",
+        "NAMESPACESXP",
+        "EXTPTRSXP",
+        "PROMSXP",
+        "DOTSXP",
+    ):
         logging.debug("---> start of object attributes")
-        attributes = parse_object(reader,rds).value
+        attributes = parse_object(reader, rds).value
         if attributes is not None:
-          robj.attributes = attributes
+            robj.attributes = attributes
         logging.debug("<--- end of object attributes")
-    
+
     # shit happens
     if not isinstance(robj.attributes, list):
-      robj.attributes = [["__raw_attributes__",robj.attributes]]
-            
+        robj.attributes = [["__raw_attributes__", robj.attributes]]
+
     robj.attributes.append(["sexptype", header["sexptype"]])
-    
+
     return robj
 
-def parse_S4SXP(reader,rds):
-    return parse_object(reader,rds) # S4 is stored as LISTSXP, so just continue
+
+def parse_S4SXP(reader, rds):
+    return parse_object(reader, rds)  # S4 is stored as LISTSXP, so just continue
+
 
 def parse_LISTSXP(reader, rds, has_tag):
     """
@@ -493,16 +547,16 @@ def parse_LISTSXP(reader, rds, has_tag):
 
     # TAG or None
     if has_tag:
-        pair_name = parse_object(reader,rds).value
+        pair_name = parse_object(reader, rds).value
     else:
         pair_name = None
 
     # CAR (always present)
-    pair_value = parse_object(reader,rds)
+    pair_value = parse_object(reader, rds)
     value.append([pair_name, pair_value])
 
     # CDR: either another pairlist cell or NULL terminator
-    rest = parse_object(reader,rds)
+    rest = parse_object(reader, rds)
 
     if rest.value is not None:
         # A proper pairlist from our parser should be represented as a list
@@ -518,7 +572,8 @@ def parse_LISTSXP(reader, rds, has_tag):
 
     return value
 
-def parse_NAMESPACESXP(reader,rds):
+
+def parse_NAMESPACESXP(reader, rds):
     """
     Parse a NAMESPACESXP (code 249).
 
@@ -545,9 +600,7 @@ def parse_NAMESPACESXP(reader,rds):
     placeholder = struct.unpack(">i", reader.read(4))[0]
     logging.debug(f"NAMESPACESXP placeholder: {placeholder}")
     if placeholder != 0:
-        logging.warning(
-            f"NAMESPACESXP: expected placeholder 0 but found {placeholder}"
-        )
+        logging.warning(f"NAMESPACESXP: expected placeholder 0 but found {placeholder}")
 
     # Length of the string vector.
     length = struct.unpack(">i", reader.read(4))[0]
@@ -555,7 +608,7 @@ def parse_NAMESPACESXP(reader,rds):
 
     strings = []
     for i in range(length):
-        elt = parse_object(reader,rds)   # typically CHARSXP Robj
+        elt = parse_object(reader, rds)  # typically CHARSXP Robj
         strings.append(elt.value)
         logging.debug(f"NAMESPACESXP element {i}: {elt.value!r}")
 
@@ -563,13 +616,14 @@ def parse_NAMESPACESXP(reader,rds):
     return strings
 
 
-def parse_SYMSXP(reader,rds):
+def parse_SYMSXP(reader, rds):
     # should be text representation of literals
-    value = parse_object(reader,rds).value
+    value = parse_object(reader, rds).value
     rds.symbols.append(value)
     return value
 
-def parse_ALTREP(reader,rds):
+
+def parse_ALTREP(reader, rds):
     """
     Parse an ALTREP object (ALTREP_SXP, code 238).
 
@@ -599,13 +653,15 @@ def parse_ALTREP(reader,rds):
     """
 
     logging.debug("ALTREP: parsing info")
-    info = parse_object(reader,rds)   # usually something indicating ALTREP class
+    info = parse_object(reader, rds)  # usually something indicating ALTREP class
 
     logging.debug("ALTREP: parsing state")
-    state = parse_object(reader,rds)  # ALTREP-specific state (e.g., length/start/step)
+    state = parse_object(reader, rds)  # ALTREP-specific state (e.g., length/start/step)
 
     logging.debug("ALTREP: parsing attr")
-    attr = parse_object(reader,rds)   # attributes that R would attach to the final object
+    attr = parse_object(
+        reader, rds
+    )  # attributes that R would attach to the final object
 
     value = [
         ["info", info],
@@ -615,6 +671,7 @@ def parse_ALTREP(reader,rds):
 
     logging.debug("ALTREP parsed into info/state/attr triple")
     return value
+
 
 def parse_CHARSXP(reader):
     size = struct.unpack(">i", reader.read(4))[0]
@@ -643,14 +700,13 @@ def parse_CHARSXP(reader):
     return value
 
 
-
-def parse_STRSXP(reader,rds):
+def parse_STRSXP(reader, rds):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
     value = np.empty(size, dtype=StringDType())
 
     for i in range(size):
-        value[i] = parse_object(reader,rds).value
+        value[i] = parse_object(reader, rds).value
     return value
 
 
@@ -664,16 +720,22 @@ def parse_CPLXSXP(reader):
         value[i] = complex(real, imag)
     return value
 
+
 def parse_REALSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = np.frombuffer(reader.read(size * 8), dtype=">f8").astype(np.float64, copy=False)
+    value = np.frombuffer(reader.read(size * 8), dtype=">f8").astype(
+        np.float64, copy=False
+    )
     return value
+
 
 def parse_INTSXP(reader):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = np.frombuffer(reader.read(size * 4), dtype=">i4").astype(np.int32, copy=False)
+    value = np.frombuffer(reader.read(size * 4), dtype=">i4").astype(
+        np.int32, copy=False
+    )
     return value
 
 
@@ -689,23 +751,23 @@ def parse_SPECIALSXP(reader):
 
 
 def parse_LGLSXP(reader):
-    # logical are stored as integers 
+    # logical are stored as integers
     value = parse_INTSXP(reader) == 1
     return value
 
 
-def parse_VECSXP(reader,rds):
+def parse_VECSXP(reader, rds):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
     value = []
     for _ in range(size):
         logging.debug(f"VECSXP: {_}/{size}")
-        value.append(parse_object(reader,rds))
+        value.append(parse_object(reader, rds))
     return value
 
 
-def parse_EXPRSXP(reader,rds):
-    return parse_VECSXP(reader,rds)
+def parse_EXPRSXP(reader, rds):
+    return parse_VECSXP(reader, rds)
 
 
 def parse_RAWSXP(reader):
@@ -715,18 +777,18 @@ def parse_RAWSXP(reader):
     return np.frombuffer(raw, dtype=np.uint8)
 
 
-def parse_DOTSXP(reader,rds, has_tag):
+def parse_DOTSXP(reader, rds, has_tag):
     return parse_LISTSXP(reader, rds, has_tag)
 
 
-def parse_PROMSXP(reader,rds, has_tag):
+def parse_PROMSXP(reader, rds, has_tag):
     """
     Parse an R promise (PROMSXP). R serializes it like a dotted pair:
     TAG = env, CAR = value, CDR = expr.
     """
-    env = parse_object(reader,rds) if has_tag else None
-    value = parse_object(reader,rds)
-    expr = parse_object(reader,rds)
+    env = parse_object(reader, rds) if has_tag else None
+    value = parse_object(reader, rds)
+    expr = parse_object(reader, rds)
     return [
         ["env", env],
         ["value", value],
@@ -734,21 +796,21 @@ def parse_PROMSXP(reader,rds, has_tag):
     ]
 
 
-def parse_WEAKREFSXP(reader,rds):
+def parse_WEAKREFSXP(reader, rds):
     """
     Weak references are serialized without payload; keep a placeholder.
     """
     return None
 
 
-def parse_ANYSXP(reader,rds):
+def parse_ANYSXP(reader, rds):
     """
     ANYSXP is a rarely serialized placeholder; treat as NULL.
     """
     return None
 
 
-def parse_ENVSXP(reader,rds):
+def parse_ENVSXP(reader, rds):
     """
     Parse an R environment (ENVSXP) according to R's serialize.c ReadItem:
 
@@ -769,19 +831,19 @@ def parse_ENVSXP(reader,rds):
 
     # ENCLOS: enclosing environment
     logging.debug("ENVSXP: parsing enclosure (ENCLOS)")
-    enclos = parse_object(reader,rds)
+    enclos = parse_object(reader, rds)
 
     # FRAME: symbol/value bindings pairlist
     logging.debug("ENVSXP: parsing frame (FRAME)")
-    frame = parse_object(reader,rds)
+    frame = parse_object(reader, rds)
 
     # HASHTAB: hash table, often NULL or VECSXP
     logging.debug("ENVSXP: parsing hash table (HASHTAB)")
-    hashtab = parse_object(reader,rds)
+    hashtab = parse_object(reader, rds)
 
     # ATTRIB: environment-specific attributes
     logging.debug("ENVSXP: parsing attributes (ATTRIB)")
-    env_attrs = parse_object(reader,rds)
+    env_attrs = parse_object(reader, rds)
 
     env_value = [
         ["locked", locked],
@@ -793,7 +855,8 @@ def parse_ENVSXP(reader,rds):
 
     return env_value
 
-def parse_CLOSXP(reader,rds, has_attributes=False):
+
+def parse_CLOSXP(reader, rds, has_attributes=False):
     """
     Parse an R closure (CLOSXP).
 
@@ -808,17 +871,17 @@ def parse_CLOSXP(reader,rds, has_attributes=False):
 
     if has_attributes:
         logging.debug("CLOSXP has attributes -> consuming attribute object")
-        _attr_robj = parse_object(reader,rds)  # ignored, just advance stream
+        _attr_robj = parse_object(reader, rds)  # ignored, just advance stream
         logging.debug("CLOSXP attributes consumed (ignored)")
 
     logging.debug("CLOSXP: parsing environment (CLOENV)")
-    env_robj = parse_object(reader,rds)
+    env_robj = parse_object(reader, rds)
 
     logging.debug("CLOSXP: parsing formals (FORMALS)")
-    formals_robj = parse_object(reader,rds)
+    formals_robj = parse_object(reader, rds)
 
     logging.debug("CLOSXP: parsing body (BODY)")
-    body_robj = parse_object(reader,rds)
+    body_robj = parse_object(reader, rds)
 
     value = [
         ["env", env_robj],
@@ -832,17 +895,17 @@ def parse_CLOSXP(reader,rds, has_attributes=False):
 
 # start of BCODESXP ####
 # Bytecode helper constants from serialize.c
-BCODESXP_CODE    = 21   # standard R SEXP type
-LANGSXP_CODE     = 6
-LISTSXP_CODE     = 2
+BCODESXP_CODE = 21  # standard R SEXP type
+LANGSXP_CODE = 6
+LISTSXP_CODE = 2
 
-BCREPDEF_CODE    = 244
-BCREPREF_CODE    = 243
+BCREPDEF_CODE = 244
+BCREPREF_CODE = 243
 ATTRLANGSXP_CODE = 240
 ATTRLISTSXP_CODE = 239
 
 
-def parse_BCODESXP(reader,rds):
+def parse_BCODESXP(reader, rds):
     """
     Parse a BCODESXP (bytecode object).
 
@@ -869,11 +932,11 @@ def parse_BCODESXP(reader,rds):
     logging.debug(f"BCODESXP: reps_len = {reps_len}")
     reps = [None] * max(reps_len, 0)
 
-    value = _read_bc1(reader, reps,rds)
+    value = _read_bc1(reader, reps, rds)
     return value
 
 
-def _read_bc1(reader, reps,rds):
+def _read_bc1(reader, reps, rds):
     """
     Python version of ReadBC1(ref_table, reps, stream).
 
@@ -884,10 +947,10 @@ def _read_bc1(reader, reps,rds):
     """
 
     logging.debug("BCODESXP: reading bytecode 'code' object")
-    code_robj = parse_object(reader,rds)
+    code_robj = parse_object(reader, rds)
 
     logging.debug("BCODESXP: reading bytecode const pool")
-    consts_list = _read_bc_consts(reader, reps,rds)  # list of Robj / nested BC
+    consts_list = _read_bc_consts(reader, reps, rds)  # list of Robj / nested BC
 
     # Wrap consts list into an Robj so that it prints as a list.
     consts_robj = Robj()
@@ -905,7 +968,7 @@ def _read_bc1(reader, reps,rds):
     return value
 
 
-def _read_bc_consts(reader, reps,rds):
+def _read_bc_consts(reader, reps, rds):
     n = struct.unpack(">i", reader.read(4))[0]
     logging.debug(f"BCODESXP consts: n = {n}")
 
@@ -931,18 +994,18 @@ def _read_bc_consts(reader, reps,rds):
             ATTRLISTSXP_CODE,
         ):
             logging.debug("BCODESXP const: using ReadBCLang-style parser")
-            const_val = _read_bc_lang(reader, type_code, reps,rds)
+            const_val = _read_bc_lang(reader, type_code, reps, rds)
             consts.append(const_val)
 
         else:
             logging.debug("BCODESXP const: delegating to parse_object()")
-            const_val = parse_object(reader,rds)
+            const_val = parse_object(reader, rds)
             consts.append(const_val)
 
     return consts
 
 
-def _read_bc_lang(reader, type_code, reps,rds):
+def _read_bc_lang(reader, type_code, reps, rds):
     """
     Python port of ReadBCLang(int type, SEXP ref_table, SEXP reps, R_inpstream_t stream).
 
@@ -982,7 +1045,7 @@ def _read_bc_lang(reader, type_code, reps,rds):
     ):
         logging.debug(f"ReadBCLang: default -> parse_object (type_code={type_code})")
         # This mirrors the 'default' case in C code (ReadItem).
-        return parse_object(reader,rds)
+        return parse_object(reader, rds)
 
     # 3. Now we're in the "real" BCLang path: BCREPDEF/LANG/LIST/ATTRLANG/ATTRLIST
     pos = -1
@@ -1013,18 +1076,18 @@ def _read_bc_lang(reader, type_code, reps,rds):
     attr_robj = None
     if hasattr:
         logging.debug("ReadBCLang: reading attributes")
-        attr_robj = parse_object(reader,rds)
+        attr_robj = parse_object(reader, rds)
 
     logging.debug("ReadBCLang: reading TAG")
-    tag_robj = parse_object(reader,rds)
+    tag_robj = parse_object(reader, rds)
 
     logging.debug("ReadBCLang: reading CAR type")
     car_type = struct.unpack(">i", reader.read(4))[0]
-    car_val = _read_bc_lang(reader, car_type, reps,rds)
+    car_val = _read_bc_lang(reader, car_type, reps, rds)
 
     logging.debug("ReadBCLang: reading CDR type")
     cdr_type = struct.unpack(">i", reader.read(4))[0]
-    cdr_val = _read_bc_lang(reader, cdr_type, reps,rds)
+    cdr_val = _read_bc_lang(reader, cdr_type, reps, rds)
 
     # Store this node in 'reps' if it was a BCREPDEF
     if 0 <= pos < len(reps):
@@ -1047,7 +1110,8 @@ def _read_bc_lang(reader, type_code, reps,rds):
             node.attributes = [["attr", attr_robj]]
 
     return node
-  
+
+
 def parse_EXTPTRSXP(reader, rds):
     """
     Parse EXTPTRSXP (external pointer).
@@ -1080,7 +1144,7 @@ def parse_EXTPTRSXP(reader, rds):
     attrs = parse_object(reader, rds)
 
     value = [
-        ["ptr", None],   # pointer is always NULL after unserialization
+        ["ptr", None],  # pointer is always NULL after unserialization
         ["prot", prot],
         ["tag", tag],
     ]
@@ -1090,258 +1154,265 @@ def parse_EXTPTRSXP(reader, rds):
 
 # end of BCODESXP ####
 
+
 # helper functions to convert to python types ###############
 def as_data_frame(robj):
-  """
-  Converts Robj to pandas DataFrame
+    """
+    Converts Robj to pandas DataFrame
 
-  Parameters
-  ----------
-  robj : Robj | str
-      Robj or path to an RDS file.
+    Parameters
+    ----------
+    robj : Robj | str
+        Robj or path to an RDS file.
 
-  Returns
-  -------
-  DataFrame
+    Returns
+    -------
+    DataFrame
 
-  Examples
-  --------
-  as_data_frame(robj)
-  as_data_frame("data.rds")
-  """
-  if isinstance(robj, str):
-    robj = parse_rds(robj)
-  cols = {}
-  names = robj.get('names').value
-  for i in range(len(names)):
-    val = robj.value[i]
-    cl = val.get('class')
-    if (cl is not None) and 'factor' in cl.value:
-      levels = val.get('levels').value
-      val = [levels[i-1] for i in val.value]
-    else:
-      val = val.value
-    cols[names[i]] = val
-    
-  r = pd.DataFrame(cols)
-  row_names = robj.get('row.names')
-  if row_names is not None:
-    r.index = row_names.value
-  return r
+    Examples
+    --------
+    as_data_frame(robj)
+    as_data_frame("data.rds")
+    """
+    if isinstance(robj, str):
+        robj = parse_rds(robj)
+    cols = {}
+    names = robj.get("names").value
+    for i in range(len(names)):
+        val = robj.value[i]
+        cl = val.get("class")
+        if (cl is not None) and "factor" in cl.value:
+            levels = val.get("levels").value
+            val = [levels[i - 1] for i in val.value]
+        else:
+            val = val.value
+        cols[names[i]] = val
+
+    r = pd.DataFrame(cols)
+    row_names = robj.get("row.names")
+    if row_names is not None:
+        r.index = row_names.value
+    return r
+
 
 def as_numpy(robj):
-  """
-  Converts Robj with array/Matrix into dense/sparse numpy array
-  
-  Parameters
-  ----------
-  robj : Robj | str
-      Robj or path to an RDS file.
+    """
+    Converts Robj with array/Matrix into dense/sparse numpy array
 
-  Returns
-  -------
-  np.array
+    Parameters
+    ----------
+    robj : Robj | str
+        Robj or path to an RDS file.
 
-  Examples
-  --------
-  as_numpy(robj)
-  as_numpy("data.rds")
-  """
-  if isinstance(robj, str):
-    robj = parse_rds(robj)
-  cl = robj.getClass()
-  if cl == 'dgCMatrix':
-    return _dgCMatrix2numpy(robj)
-  if cl == 'REALSXP':
-    return _array2numpy(robj)
+    Returns
+    -------
+    np.array
+
+    Examples
+    --------
+    as_numpy(robj)
+    as_numpy("data.rds")
+    """
+    if isinstance(robj, str):
+        robj = parse_rds(robj)
+    cl = robj.getClass()
+    if cl == "dgCMatrix":
+        return _dgCMatrix2numpy(robj)
+    if cl == "REALSXP":
+        return _array2numpy(robj)
+
 
 def as_anndata(robj):
-  """
-  Converts Robj with array/Matrix into dense/sparse anndata keeping dimnames if any
-  
-  Parameters
-  ----------
-  robj : Robj | str
-      Robj or path to an RDS file.
+    """
+    Converts Robj with array/Matrix into dense/sparse anndata keeping dimnames if any
 
-  Returns
-  -------
-  ad.AnnData
+    Parameters
+    ----------
+    robj : Robj | str
+        Robj or path to an RDS file.
 
-  Examples
-  --------
-  as_anndata(robj)
-  as_anndata("data.rds")
-  """
-  if isinstance(robj, str):
-    robj = parse_rds(robj)
-  X = as_numpy(robj).T
-  adata = ad.AnnData(X=X)
-  dimnames = robj.get('dimnames')
-  if( dimnames is None):
-    dimnames = robj.get('Dimnames') # for sparse Matrices 
-  
-  if dimnames is not None:
-    dimnames = dimnames.value
-    if dimnames[0].value is not None:
-      adata.var_names = dimnames[0].value
-    if dimnames[1].value is not None:
-      adata.obs_names = dimnames[1].value
-  return adata
+    Returns
+    -------
+    ad.AnnData
+
+    Examples
+    --------
+    as_anndata(robj)
+    as_anndata("data.rds")
+    """
+    if isinstance(robj, str):
+        robj = parse_rds(robj)
+    X = as_numpy(robj).T
+    adata = ad.AnnData(X=X)
+    dimnames = robj.get("dimnames")
+    if dimnames is None:
+        dimnames = robj.get("Dimnames")  # for sparse Matrices
+
+    if dimnames is not None:
+        dimnames = dimnames.value
+        if dimnames[0].value is not None:
+            adata.var_names = dimnames[0].value
+        if dimnames[1].value is not None:
+            adata.obs_names = dimnames[1].value
+    return adata
+
 
 def as_dict(robj):
     """
     Converts toplevel Robj to dict.
     Expects that robj has `names` slot of same length as number of values
-    
+
     Doesn't pay any attention to lower level objects (so thy can still be Robj).
     """
-    names = robj.get('names').value
-    r = {names[i]:robj.get(i).value for i in range(len(names))}
+    names = robj.get("names").value
+    r = {names[i]: robj.get(i).value for i in range(len(names))}
     return r
 
-def seurat2adata(robj,assay=0,layer='counts'):
-  """
-  Converts Seurat Robj into anndata
-  it loads:
-  1. specified assay/layer as data
-  2. cell metadata
-  3. var metadata if any
-  4. all reduced dimensions
-  
-  Parameters
-  ----------
-  robj : Robj or str (path 2 rds file)
-  assay : int - assay index
-  layer : str - named of layer to use
 
-  Returns
-  -------
-  AnnData
+def seurat2adata(robj, assay=0, layer="counts"):
+    """
+    Converts Seurat Robj into anndata
+    it loads:
+    1. specified assay/layer as data
+    2. cell metadata
+    3. var metadata if any
+    4. all reduced dimensions
 
-  Examples
-  --------
-  seurat2adata(robj)
-  """
-  if isinstance(robj,str):
-    robj = parse_rds(robj)
-  cnts = robj.get(['assays',assay,layer])
-  obs = as_data_frame(robj.get('meta.data'))
-  
-  if cnts is not None:
-    adata = as_anndata(cnts)
-    adata.var = as_data_frame(robj.get(['assays',assay,'meta.features']))
-    adata.obs = obs.loc[adata.obs_names,:]
-  # try Assay5
-  else:
-    names = robj.get(['assays',assay,'layers','names']).value
-    layer_idx = np.where(names == layer)[0]
-    if layer_idx.size == 0:
-      raise ValueError(f"Layer '{layer}' not found in assay {assay}.")
-    layer_idx = int(layer_idx[0])
-    cnts  = robj.get(['assays',assay,'layers',layer_idx])
-    adata = as_anndata(cnts)
-    adata.var_names = robj.get(['assays',0,'features','dimnames',0]).value
-    adata.obs = obs
-  # load reduced dims
-  rdims = robj.get(['reductions'])
-  rdims_names = rdims.get('names')
-  if rdims_names is not None:
-    rdims_names = rdims_names.value
-    for i in range(len(rdims_names)):
-      adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i,'cell.embeddings']))
-  
-  return adata
+    Parameters
+    ----------
+    robj : Robj or str (path 2 rds file)
+    assay : int - assay index
+    layer : str - named of layer to use
 
-def seurat2adata_spatial(robj,assay=0,layer='counts'):
-  """
-  Converts Visium Seurat Robj into spatial anndata.
-  It loads:
-  1. specified assay/layer as data
-  2. cell metadata
-  3. var metadata if any
-  4. spatial coordinates into adata.obsm['spatial']
-  5. spatial metadata into adata.uns['spatial']
+    Returns
+    -------
+    AnnData
 
-  Parameters
-  ----------
-  robj : Robj or str (path 2 rds file)
-  assay : int - assay index
-  layer : str - named of layer to use
+    Examples
+    --------
+    seurat2adata(robj)
+    """
+    if isinstance(robj, str):
+        robj = parse_rds(robj)
+    cnts = robj.get(["assays", assay, layer])
+    obs = as_data_frame(robj.get("meta.data"))
 
-  Returns
-  -------
-  AnnData
-  """
-  if isinstance(robj,str):
-    robj = parse_rds(robj)
-  adata = seurat2adata(robj,assay=assay,layer=layer)
+    if cnts is not None:
+        adata = as_anndata(cnts)
+        adata.var = as_data_frame(robj.get(["assays", assay, "meta.features"]))
+        adata.obs = obs.loc[adata.obs_names, :]
+    # try Assay5
+    else:
+        names = robj.get(["assays", assay, "layers", "names"]).value
+        layer_idx = np.where(names == layer)[0]
+        if layer_idx.size == 0:
+            raise ValueError(f"Layer '{layer}' not found in assay {assay}.")
+        layer_idx = int(layer_idx[0])
+        cnts = robj.get(["assays", assay, "layers", layer_idx])
+        adata = as_anndata(cnts)
+        adata.var_names = robj.get(["assays", 0, "features", "dimnames", 0]).value
+        adata.obs = obs
+    # load reduced dims
+    rdims = robj.get(["reductions"])
+    rdims_names = rdims.get("names")
+    if rdims_names is not None:
+        rdims_names = rdims_names.value
+        for i in range(len(rdims_names)):
+            adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i, "cell.embeddings"]))
 
-  images = robj.get('images')
-  if images is None: # not spatial
     return adata
 
-  img_names = images.get('names').value.tolist()
 
-  spatial_uns = {}
-  spatial_coords = None
-  for i, name in enumerate(img_names):
-    img_obj = images.get(i)
-    img = as_numpy(img_obj.get('image'))
-    coords = as_data_frame(img_obj.get('coordinates'))
-    spatial_coords = pd.concat([spatial_coords,coords],axis=0)
+def seurat2adata_spatial(robj, assay=0, layer="counts"):
+    """
+    Converts Visium Seurat Robj into spatial anndata.
+    It loads:
+    1. specified assay/layer as data
+    2. cell metadata
+    3. var metadata if any
+    4. spatial coordinates into adata.obsm['spatial']
+    5. spatial metadata into adata.uns['spatial']
 
-    scalefactors = as_dict(img_obj.get('scale.factors'))
-    scalefactors = {
-        'fiducial_diameter_fullres': scalefactors['fiducial'][0],
-        'spot_diameter_fullres': scalefactors['fiducial'][0] * 0.55, # Seurat messed up spot sizes, but this looks about right
-        'tissue_hires_scalef': scalefactors['hires'][0], 
-        'tissue_lowres_scalef': scalefactors['lowres'][0]
-    }
-    spatial_uns[name] = { 
-        'images' :{'lowres' : img}, # Seurat uses lowres by default
-        'scalefactors' : scalefactors
-    }
-  
-  if spatial_uns:
-    adata.uns['spatial'] = spatial_uns
-  adata.obsm['spatial'] = spatial_coords.loc[adata.obs_names,['imagecol','imagerow']].to_numpy()
-  return adata
+    Parameters
+    ----------
+    robj : Robj or str (path 2 rds file)
+    assay : int - assay index
+    layer : str - named of layer to use
+
+    Returns
+    -------
+    AnnData
+    """
+    if isinstance(robj, str):
+        robj = parse_rds(robj)
+    adata = seurat2adata(robj, assay=assay, layer=layer)
+
+    images = robj.get("images")
+    if images is None:  # not spatial
+        return adata
+
+    img_names = images.get("names").value.tolist()
+
+    spatial_uns = {}
+    spatial_coords = None
+    for i, name in enumerate(img_names):
+        img_obj = images.get(i)
+        img = as_numpy(img_obj.get("image"))
+        coords = as_data_frame(img_obj.get("coordinates"))
+        spatial_coords = pd.concat([spatial_coords, coords], axis=0)
+
+        scalefactors = as_dict(img_obj.get("scale.factors"))
+        scalefactors = {
+            "fiducial_diameter_fullres": scalefactors["fiducial"][0],
+            "spot_diameter_fullres": scalefactors["fiducial"][0]
+            * 0.55,  # Seurat messed up spot sizes, but this looks about right
+            "tissue_hires_scalef": scalefactors["hires"][0],
+            "tissue_lowres_scalef": scalefactors["lowres"][0],
+        }
+        spatial_uns[name] = {
+            "images": {"lowres": img},  # Seurat uses lowres by default
+            "scalefactors": scalefactors,
+        }
+
+    if spatial_uns:
+        adata.uns["spatial"] = spatial_uns
+    adata.obsm["spatial"] = spatial_coords.loc[
+        adata.obs_names, ["imagecol", "imagerow"]
+    ].to_numpy()
+    return adata
+
 
 def _array2numpy(robj):
-  """
-  Converts Robj with array into dense numpy array
-  Expect R array (dense)
-  
-  Parameters
-  ----------
-  robj : Robj
+    """
+    Converts Robj with array into dense numpy array
+    Expect R array (dense)
 
-  Returns
-  -------
-  np.array
+    Parameters
+    ----------
+    robj : Robj
 
-  Examples
-  --------
-  _array2numpy(robj)
-  """
-  dim = robj.get('dim')
-  if dim is None:
-    dim = len(robj.value)
-  else:
-    dim = dim.value
-  X = np.array(robj.value).reshape(dim,order='F')
-  return X
-  
+    Returns
+    -------
+    np.array
+
+    Examples
+    --------
+    _array2numpy(robj)
+    """
+    dim = robj.get("dim")
+    if dim is None:
+        dim = len(robj.value)
+    else:
+        dim = dim.value
+    X = np.array(robj.value).reshape(dim, order="F")
+    return X
+
+
 def _dgCMatrix2numpy(robj):
-  i = robj.get('i').value
-  p = robj.get('p').value
-  dim = robj.get('Dim').value
-  x = robj.get('x').value
-  dimnames = robj.get('Dimnames').value
-  X = sparse.csc_matrix((x, i, p), dim)
-  return X
-
-
-
-    
+    i = robj.get("i").value
+    p = robj.get("p").value
+    dim = robj.get("Dim").value
+    x = robj.get("x").value
+    dimnames = robj.get("Dimnames").value
+    X = sparse.csc_matrix((x, i, p), dim)
+    return X
