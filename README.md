@@ -36,3 +36,8 @@ Each Robj has values that are indexed by integers (shown as `+N` by `show` funct
 
 ## Acknowledgements
 [Amazing blog](https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/) by Danielle Navarro allowed us to kick start the project, alternative projects such as [rds2cpp](https://github.com/LTLA/rds2cpp/blob/master/include/rds2cpp/parse_object.hpp) helped to move forward, [r source code](https://github.com/wch/r-source/blob/trunk/src/main/serialize.c) became the last resort after meeting with [R documentation](https://cran.r-project.org/doc/manuals/r-release/R-ints.html#Serialization-Formats) and at the very end chatGPT came to our rescue.
+
+## Similar projects
+1. [rds2py](https://github.com/BiocPy/rds2py), based on rds2cpp, cannot read functions so fails on complex objects such as Seurat
+2. [pyreadr](https://github.com/ofajardo/pyreadr), focused on simple data types such as data.frames
+3. [rdata](https://github.com/vnmabus/rdata) in addition to reading rds files can also save python objects into rds.
