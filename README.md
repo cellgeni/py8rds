@@ -39,5 +39,5 @@ Each Robj has values that are indexed by integers (shown as `+N` by `show` funct
 
 ## Similar projects
 1. [rds2py](https://github.com/BiocPy/rds2py), based on rds2cpp, cannot read functions so fails on complex objects such as Seurat
-2. [pyreadr](https://github.com/ofajardo/pyreadr), focused on simple data types such as data.frames
-3. [rdata](https://github.com/vnmabus/rdata) in addition to reading rds files can also save python objects into rds.
+2. [pyreadr](https://github.com/ofajardo/pyreadr), focused on simple data types such as data.frames, cannot read complex objects such as Seurat.
+3. [rdata](https://github.com/vnmabus/rdata) in addition to reading rds files is can also save python objects into rds, but it fails to read Seurat objects.
