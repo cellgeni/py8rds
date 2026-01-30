@@ -76,13 +76,13 @@ class Robj:
     def get(self, inxs):
         """
         Recursively navigate into an Robj using indices and/or names.
-        Indeces are used to only search in value, names are used to search both in attributes (first)
-        and then in values if they are paired list (should be the case for S4 slots)
+        Indices are used only to search in the value; names are used to search both in attributes (first)
+        and then in values if they are a pairlist (should be the case for S4 slots).
 
         Parameters
         ----------
         inxs : int | str | list[int | str]
-            A single index/name or a list describing a path withint R obj
+            A single index/name or a list describing a path within an R object.
 
         Returns
         -------
@@ -226,7 +226,7 @@ class Robj:
         # attributes
         for a in self.attributes:
             if len(a) != 2:
-                raise RuntimeError("Atributes are not in pair:" + str(a))
+                raise RuntimeError("Attributes are not in a pair: " + str(a))
             if a[0] != "sexptype":
                 parts.append(
                     a[1].toString(
@@ -496,8 +496,8 @@ def parse_object(reader, rds: RdsFile):
         raise NotImplementedError(f"unimplemented SEXPTYPE '{header['sexptype']}'")
 
     logging.debug(header)
-    # S4 fields are stored as attribures (pairlist), so attr flag is true, but we will store them as data.
-    # so at this point for S4 we've already read attributes
+    # S4 fields are stored as attributes (pairlist), so the attr flag is true, but we store them as data.
+    # At this point for S4, we've already read attributes.
     if header["flags"]["attributes"] and header["sexptype"] not in (
         "S4SXP",
         "ENVSXP",
@@ -516,7 +516,7 @@ def parse_object(reader, rds: RdsFile):
             robj.attributes = attributes
         logging.debug("<--- end of object attributes")
 
-    # shit happens
+    # Fallback if attributes aren't in the expected list form.
     if not isinstance(robj.attributes, list):
         robj.attributes = [["__raw_attributes__", robj.attributes]]
 
@@ -1158,7 +1158,7 @@ def parse_EXTPTRSXP(reader, rds):
 # helper functions to convert to python types ###############
 def as_data_frame(robj):
     """
-    Converts Robj to pandas DataFrame
+    Converts an Robj to a pandas DataFrame.
 
     Parameters
     ----------
@@ -1197,7 +1197,7 @@ def as_data_frame(robj):
 
 def as_numpy(robj):
     """
-    Converts Robj with array/Matrix into dense/sparse numpy array
+    Converts an Robj with an array/matrix into a dense or sparse NumPy array.
 
     Parameters
     ----------
@@ -1224,7 +1224,7 @@ def as_numpy(robj):
 
 def as_anndata(robj):
     """
-    Converts Robj with array/Matrix into dense/sparse anndata keeping dimnames if any
+    Converts an Robj with an array/matrix into dense/sparse AnnData, keeping dimnames if any.
 
     Parameters
     ----------
@@ -1259,10 +1259,10 @@ def as_anndata(robj):
 
 def as_dict(robj):
     """
-    Converts toplevel Robj to dict.
-    Expects that robj has `names` slot of same length as number of values
+    Converts a top-level Robj to a dict.
+    Expects that robj has a `names` slot of the same length as the number of values.
 
-    Doesn't pay any attention to lower level objects (so thy can still be Robj).
+    Doesn't pay any attention to lower-level objects (so they can still be Robj).
     """
     names = robj.get("names").value
     r = {names[i]: robj.get(i).value for i in range(len(names))}
@@ -1271,8 +1271,8 @@ def as_dict(robj):
 
 def seurat2adata(robj, assay=0, layer="counts"):
     """
-    Converts Seurat Robj into anndata
-    it loads:
+    Converts a Seurat Robj into AnnData.
+    It loads:
     1. specified assay/layer as data
     2. cell metadata
     3. var metadata if any
@@ -1280,9 +1280,9 @@ def seurat2adata(robj, assay=0, layer="counts"):
 
     Parameters
     ----------
-    robj : Robj or str (path 2 rds file)
+    robj : Robj or str (path to an RDS file)
     assay : int - assay index
-    layer : str - named of layer to use
+    layer : str - name of the layer to use
 
     Returns
     -------
@@ -1325,7 +1325,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
 
 def seurat2adata_spatial(robj, assay=0, layer="counts"):
     """
-    Converts Visium Seurat Robj into spatial anndata.
+    Converts a Visium Seurat Robj into spatial AnnData.
     It loads:
     1. specified assay/layer as data
     2. cell metadata
@@ -1335,9 +1335,9 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
 
     Parameters
     ----------
-    robj : Robj or str (path 2 rds file)
+    robj : Robj or str (path to an RDS file)
     assay : int - assay index
-    layer : str - named of layer to use
+    layer : str - name of the layer to use
 
     Returns
     -------
@@ -1384,8 +1384,8 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
 
 def _array2numpy(robj):
     """
-    Converts Robj with array into dense numpy array
-    Expect R array (dense)
+    Converts an Robj with an array into a dense NumPy array.
+    Expects an R array (dense).
 
     Parameters
     ----------
