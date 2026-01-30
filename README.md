@@ -42,4 +42,4 @@ Each Robj has values that are indexed by integers (shown as `+N` by `show` funct
 2. [pyreadr](https://github.com/ofajardo/pyreadr), focused on simple data types such as data.frames, cannot read complex objects such as Seurat.
 3. [rdata](https://github.com/vnmabus/rdata) in addition to reading rds files is can also save python objects into rds, but it fails to read Seurat objects.
 
-So, neither of alternative seems to be able (at least at given moment) to read Seurat object (see this [notebook](tutorials/alternatives.ipynb)).
+So, neither of alternatives seems to be able (at least at the given moment) to read Seurat objects (see this [notebook](tutorials/alternatives.ipynb)).
