@@ -1190,8 +1190,9 @@ def as_data_frame(robj):
 
     r = pd.DataFrame(cols)
     row_names = robj.get("row.names")
-    if row_names is not None:
-        r.index = row_names.value
+    if (row_names is not None) and (row_names.value is not None):
+        if (len(row_names.value) != 2) or (row_names.value[0] != -2147483648): # to treat NULL rownames
+            r.index = row_names.value
     return r
 
 
@@ -1298,9 +1299,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
     obs = as_data_frame(robj.get("meta.data"))
 
     if cnts is not None:
-        adata = as_anndata(cnts)
-        adata.var = as_data_frame(robj.get(["assays", assay, "meta.features"]))
-        adata.obs = obs.loc[adata.obs_names, :]
+        var = as_data_frame(robj.get(["assays", assay, "meta.features"]))
     # try Assay5
     else:
         names = robj.get(["assays", assay, "layers", "names"]).value
@@ -1309,9 +1308,18 @@ def seurat2adata(robj, assay=0, layer="counts"):
             raise ValueError(f"Layer '{layer}' not found in assay {assay}.")
         layer_idx = int(layer_idx[0])
         cnts = robj.get(["assays", assay, "layers", layer_idx])
-        adata = as_anndata(cnts)
-        adata.var_names = robj.get(["assays", 0, "features", "dimnames", 0]).value
-        adata.obs = obs
+        var = pd.DataFrame(index=robj.get(["assays", 0, "features", "dimnames", 0]).value)
+     
+    
+    adata = as_anndata(cnts)
+    # try to keep dimnames if they are missed in obs/var
+    if is_default_index(obs):
+        obs.index = adata.obs_names
+    if is_default_index(var):
+        var.index = adata.var_names
+    
+    adata.obs = obs
+    adata.var = var
     # load reduced dims
     rdims = robj.get(["reductions"])
     rdims_names = rdims.get("names")
@@ -1321,7 +1329,6 @@ def seurat2adata(robj, assay=0, layer="counts"):
             adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i, "cell.embeddings"]))
 
     return adata
-
 
 def seurat2adata_spatial(robj, assay=0, layer="counts"):
     """
@@ -1416,3 +1423,6 @@ def _dgCMatrix2numpy(robj):
     dimnames = robj.get("Dimnames").value
     X = sparse.csc_matrix((x, i, p), dim)
     return X
+
+def is_default_index(df):
+    return isinstance(df.index, pd.RangeIndex) and df.index.equals(pd.RangeIndex(start=0, stop=len(df), step=1))
