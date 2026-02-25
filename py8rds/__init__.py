@@ -8,6 +8,7 @@ import numpy as np
 from numpy.dtypes import StringDType
 
 __version__ = "0.0.1"
+INT_NA = -2147483648
 
 logging.basicConfig(level="DEBUG", format="[%(asctime)s][%(levelname)s] %(message)s")
 logging.getLogger().setLevel("INFO")
@@ -668,6 +669,9 @@ def parse_ALTREP(reader, rds):
         ["state", state],
         ["attr", attr],
     ]
+    # convert known ALTREPs into usual representationa
+    if info.value[0][1].value == 'compact_intseq':
+        value = state.value[1] + state.value[2] * np.arange(state.value[0])    
 
     logging.debug("ALTREP parsed into info/state/attr triple")
     return value
@@ -1183,7 +1187,7 @@ def as_data_frame(robj):
         cl = val.get("class")
         if (cl is not None) and "factor" in cl.value:
             levels = val.get("levels").value
-            val = [levels[i - 1] for i in val.value]
+            val = [levels[i - 1] if i != INT_NA else None for i in val.value]
         else:
             val = val.value
         cols[names[i]] = val
@@ -1191,8 +1195,18 @@ def as_data_frame(robj):
     r = pd.DataFrame(cols)
     row_names = robj.get("row.names")
     if (row_names is not None) and (row_names.value is not None):
-        if (len(row_names.value) != 2) or (row_names.value[0] != -2147483648): # to treat NULL rownames
+        if (len(row_names.value) != 2) or (row_names.value[0] != INT_NA): # to treat NULL rownames
             r.index = row_names.value
+    
+    # set int NAs, cannot do in before as numpy int32 doesn't support NAs
+    int32_cols = r.select_dtypes(include=["int32"]).columns
+
+    r[int32_cols] = (
+        r[int32_cols]
+        .astype("Int32")
+        .replace(INT_NA, pd.NA)
+    )
+    
     return r
 
 
