@@ -1160,6 +1160,25 @@ def parse_EXTPTRSXP(reader, rds):
 
 
 # helper functions to convert to python types ###############
+def factor2list(robj):
+    """
+    Converts an Robj with factor to list
+
+    Parameters
+    ----------
+    robj : Robj 
+
+    Returns
+    -------
+    list
+    """
+    val = None
+    cl = robj.get("class")
+    if (cl is not None) and "factor" in cl.value:
+        levels = robj.get("levels").value
+        val = [levels[i - 1] if i != INT_NA else None for i in robj.value]
+    return val
+
 def as_data_frame(robj):
     """
     Converts an Robj to a pandas DataFrame.
@@ -1186,8 +1205,7 @@ def as_data_frame(robj):
         val = robj.value[i]
         cl = val.get("class")
         if (cl is not None) and "factor" in cl.value:
-            levels = val.get("levels").value
-            val = [levels[i - 1] if i != INT_NA else None for i in val.value]
+            val = factor2list(val)
         else:
             val = val.value
         cols[names[i]] = val
@@ -1291,12 +1309,12 @@ def seurat2adata(robj, assay=0, layer="counts"):
     1. specified assay/layer as data
     2. cell metadata
     3. var metadata if any
-    4. all reduced dimensions
+    4. all reduced dimensions assotiated with given assay
 
     Parameters
     ----------
     robj : Robj or str (path to an RDS file)
-    assay : int - assay index
+    assay : int or string - assay index or name
     layer : str - name of the layer to use
 
     Returns
@@ -1309,6 +1327,12 @@ def seurat2adata(robj, assay=0, layer="counts"):
     """
     if isinstance(robj, str):
         robj = parse_rds(robj)
+
+    assay_names = robj.get(["assays", "names"]).value.tolist()
+
+    if isinstance(assay, str):
+        assay = assay_names.index(assay)
+    
     cnts = robj.get(["assays", assay, layer])
     obs = as_data_frame(robj.get("meta.data"))
 
@@ -1326,21 +1350,35 @@ def seurat2adata(robj, assay=0, layer="counts"):
      
     
     adata = as_anndata(cnts)
+
+    # try to get obs names from assay if they absent in layer
+    if is_default_index(adata.obs):
+        obs_names = robj.get(['assays',assay,'cells','dimnames',0])
+        if (obs_names is not None) and (len(obs_names.value) == adata.shape[0]):
+            adata.obs_names = obs_names.value
+
     # try to keep dimnames if they are missed in obs/var
     if is_default_index(obs):
         obs.index = adata.obs_names
+
     if is_default_index(var):
         var.index = adata.var_names
-    
+
+    if not is_default_index(obs) and not is_default_index(adata.obs):
+        obs = obs.loc[adata.obs_names,:]
+
     adata.obs = obs
     adata.var = var
+
     # load reduced dims
     rdims = robj.get(["reductions"])
     rdims_names = rdims.get("names")
     if rdims_names is not None:
         rdims_names = rdims_names.value
         for i in range(len(rdims_names)):
-            adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i, "cell.embeddings"]))
+            assay_used = rdims.get([i,'assay.used',0])
+            if (assay_used is None) or assay_used ==  assay_names[assay]:
+                adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i, "cell.embeddings"]))
 
     return adata
 
@@ -1439,4 +1477,12 @@ def _dgCMatrix2numpy(robj):
     return X
 
 def is_default_index(df):
-    return isinstance(df.index, pd.RangeIndex) and df.index.equals(pd.RangeIndex(start=0, stop=len(df), step=1))
+    idx = df.index
+    
+    if isinstance(idx, pd.RangeIndex):
+        return idx.start == 0 and idx.step == 1 and idx.stop == len(df)
+    
+    try:
+        return pd.Index(idx.astype(int)).equals(pd.RangeIndex(len(df)))
+    except (ValueError, TypeError):
+        return False
