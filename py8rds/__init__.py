@@ -670,8 +670,8 @@ def parse_ALTREP(reader, rds):
         ["attr", attr],
     ]
     # convert known ALTREPs into usual representationa
-    if info.value[0][1].value == 'compact_intseq':
-        value = state.value[1] + state.value[2] * np.arange(state.value[0])    
+    if info.value[0][1].value == "compact_intseq":
+        value = state.value[1] + state.value[2] * np.arange(state.value[0])
 
     logging.debug("ALTREP parsed into info/state/attr triple")
     return value
@@ -707,10 +707,14 @@ def parse_CHARSXP(reader):
 def parse_STRSXP(reader, rds):
     size = struct.unpack(">I", reader.read(4))[0]
     logging.debug(f"size       {size}")
-    value = np.empty(size, dtype=StringDType())
+    value = np.empty(size, dtype=StringDType(na_object=np.nan))
 
     for i in range(size):
-        value[i] = parse_object(reader, rds).value
+        v = parse_object(reader, rds).value
+        if v is None:
+            value[i] = np.nan
+        else:
+            value[i] = v
     return value
 
 
@@ -756,7 +760,8 @@ def parse_SPECIALSXP(reader):
 
 def parse_LGLSXP(reader):
     # logical are stored as integers
-    value = parse_INTSXP(reader) == 1
+    value = parse_INTSXP(reader)
+    value = np.ma.array(value == 1, mask=value == INT_NA)
     return value
 
 
@@ -1160,13 +1165,13 @@ def parse_EXTPTRSXP(reader, rds):
 
 
 # helper functions to convert to python types ###############
-def factor2list(robj):
+def factor2array(robj):
     """
     Converts an Robj with factor to list
 
     Parameters
     ----------
-    robj : Robj 
+    robj : Robj
 
     Returns
     -------
@@ -1175,9 +1180,15 @@ def factor2list(robj):
     val = None
     cl = robj.get("class")
     if (cl is not None) and "factor" in cl.value:
+        val = np.empty(len(robj.value), dtype=StringDType(na_object=np.nan))
         levels = robj.get("levels").value
-        val = [levels[i - 1] if i != INT_NA else None for i in robj.value]
+        for i in range(len(robj.value)):
+            if robj.value[i] != INT_NA:
+                val[i] = levels[robj.value[i] - 1]
+            else:
+                val[i] = np.nan
     return val
+
 
 def as_data_frame(robj):
     """
@@ -1205,7 +1216,7 @@ def as_data_frame(robj):
         val = robj.value[i]
         cl = val.get("class")
         if (cl is not None) and "factor" in cl.value:
-            val = factor2list(val)
+            val = factor2array(val)
         else:
             val = val.value
         cols[names[i]] = val
@@ -1213,18 +1224,16 @@ def as_data_frame(robj):
     r = pd.DataFrame(cols)
     row_names = robj.get("row.names")
     if (row_names is not None) and (row_names.value is not None):
-        if (len(row_names.value) != 2) or (row_names.value[0] != INT_NA): # to treat NULL rownames
+        if (len(row_names.value) != 2) or (
+            row_names.value[0] != INT_NA
+        ):  # to treat NULL rownames
             r.index = row_names.value
-    
+
     # set int NAs, cannot do in before as numpy int32 doesn't support NAs
     int32_cols = r.select_dtypes(include=["int32"]).columns
 
-    r[int32_cols] = (
-        r[int32_cols]
-        .astype("Int32")
-        .replace(INT_NA, pd.NA)
-    )
-    
+    r[int32_cols] = r[int32_cols].astype("Int32").replace(INT_NA, pd.NA)
+
     return r
 
 
@@ -1332,7 +1341,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
 
     if isinstance(assay, str):
         assay = assay_names.index(assay)
-    
+
     cnts = robj.get(["assays", assay, layer])
     obs = as_data_frame(robj.get("meta.data"))
 
@@ -1346,26 +1355,33 @@ def seurat2adata(robj, assay=0, layer="counts"):
             raise ValueError(f"Layer '{layer}' not found in assay {assay}.")
         layer_idx = int(layer_idx[0])
         cnts = robj.get(["assays", assay, "layers", layer_idx])
-        var = pd.DataFrame(index=robj.get(["assays", 0, "features", "dimnames", 0]).value)
-     
-    
+        var = pd.DataFrame(
+            index=robj.get(["assays", 0, "features", "dimnames", 0]).value
+        )
+
     adata = as_anndata(cnts)
 
     # try to get obs names from assay if they absent in layer
     if is_default_index(adata.obs):
-        obs_names = robj.get(['assays',assay,'cells','dimnames',0])
+        obs_names = robj.get(["assays", assay, "cells", "dimnames", 0])
         if (obs_names is not None) and (len(obs_names.value) == adata.shape[0]):
             adata.obs_names = obs_names.value
 
     # try to keep dimnames if they are missed in obs/var
-    if is_default_index(obs):
+    if is_default_index(obs) and (obs.shape[0] == adata.shape[0]):
         obs.index = adata.obs_names
+
+    # one more place to find obs_names
+    if is_default_index(obs):
+        obs_names = robj.get(["active.ident", "names"]).value
+        if obs.shape[0] == len(obs_names):
+            obs.index = obs_names
 
     if is_default_index(var):
         var.index = adata.var_names
 
     if not is_default_index(obs) and not is_default_index(adata.obs):
-        obs = obs.loc[adata.obs_names,:]
+        obs = obs.loc[adata.obs_names, :]
 
     adata.obs = obs
     adata.var = var
@@ -1376,11 +1392,14 @@ def seurat2adata(robj, assay=0, layer="counts"):
     if rdims_names is not None:
         rdims_names = rdims_names.value
         for i in range(len(rdims_names)):
-            assay_used = rdims.get([i,'assay.used',0])
-            if (assay_used is None) or assay_used ==  assay_names[assay]:
-                adata.obsm[rdims_names[i]] = _array2numpy(rdims.get([i, "cell.embeddings"]))
+            assay_used = rdims.get([i, "assay.used", 0])
+            if (assay_used is None) or assay_used == assay_names[assay]:
+                adata.obsm[rdims_names[i]] = _array2numpy(
+                    rdims.get([i, "cell.embeddings"])
+                )
 
     return adata
+
 
 def seurat2adata_spatial(robj, assay=0, layer="counts"):
     """
@@ -1476,12 +1495,13 @@ def _dgCMatrix2numpy(robj):
     X = sparse.csc_matrix((x, i, p), dim)
     return X
 
+
 def is_default_index(df):
     idx = df.index
-    
+
     if isinstance(idx, pd.RangeIndex):
         return idx.start == 0 and idx.step == 1 and idx.stop == len(df)
-    
+
     try:
         return pd.Index(idx.astype(int)).equals(pd.RangeIndex(len(df)))
     except (ValueError, TypeError):

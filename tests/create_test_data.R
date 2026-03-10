@@ -1,16 +1,4 @@
-show_rds <- function(object, header = TRUE,print=TRUE) {
-  rds <- object |>
-    serialize(connection = NULL, ascii = TRUE) |>
-    rawToChar() |>
-    strsplit(split = "\n") |>
-    unlist()
-  if(header == FALSE) rds <- rds[-(1:6)]
-  if(print)
-    cat(rds, sep = "\n")
-  invisible(rds)
-}
-
-### Vectors
+# Vectors ##################
 v1 = c(1,2,3,4,5)
 saveRDS(v1,"atomic_vector_num.rds")
 
@@ -20,50 +8,63 @@ saveRDS(v2,"atomic_vector_char.rds")
 v3 = c(TRUE,TRUE,FALSE,FALSE,TRUE)
 saveRDS(v3,"atomic_vector_bool.rds")
 
-### Regular sequence
+# Regular sequence ##########
 rseq = 1:5
 saveRDS(rseq,"regular_sequence.rds")
 
-### Data Frame
+# Data Frame ###############
 data_frame <- data.frame (
-  CharVec = c("a",   "b",  "c" ),
-  NumVec  = c( 1,     2,    3  ),
-  BoolVec = c(TRUE, FALSE, TRUE)
+  CharVec = c(NA, "a",   "b",  "c" ),
+  NumVec  = c( 1,     2,    3  , NA),
+  BoolVec = c(TRUE, FALSE, NA, TRUE),
+  Factor  = factor(c('A',NA,'B','C')),
+  row.names = c('r1','r2','r3','r4')
 )
-saveRDS(data_frame,"data.frame.rds")
+saveRDS(data_frame,"data.frame_with_rownames.rds")
+rownames(data_frame) = NULL
 
-### Seurat (S4)
-download.file("https://cf.10xgenomics.com/samples/cell-vdj/4.0.0/sc5p_v2_hs_PBMC_1k/sc5p_v2_hs_PBMC_1k_filtered_feature_bc_matrix.tar.gz","PBMC.tar.gz")
-untar("PBMC.tar.gz", exdir="10xPBMC")
-library(Seurat)
-pbmc = Read10X("10xPBMC/filtered_feature_bc_matrix")
-seurat_object = CreateSeuratObject(counts = pbmc$`Gene Expression`)
-saveRDS(seurat_object, "seurat.rds")
+saveRDS(data_frame,"data.frame_without_rownames.rds")
 
-
-# create more exotic types ######
-# environments, parsing is not implemented yet
+# environment
 a = new.env()
 a$var = 1
 a$foo = 'a'
 a$bar = 'b'
-# show_rds(a) # strange irregular stretches of 254....
-saveRDS(a,'env.rds')
+saveRDS(a,'environment.rds')
 
 
-# pairlists are used to store attributes and expressions
-pl = pairlist(name1='val1',name2='val1',name2='val1')
-# the names of pairlists are added to seqpool and all next occurences are recorded as index=(i+1)/2^8 - 2 in the seqpool
-# show_rds(pl)
-saveRDS(pl,'pairlist.rds')
+# Seurat  ########
+# with sketch
+library(Seurat)
+curl::curl_download('https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz',destfile = 'pbmc3k_filtered_gene_bc_matrices.tar.gz')
+system("tar -xzf pbmc3k_filtered_gene_bc_matrices.tar.gz")
 
-# symbols looks similar to chars
-sym = rlang::sym('abc')
-# show_rds(sym)
-saveRDS(sym,'symbol.rds')
+pbmc.data <- Read10X(data.dir = "filtered_gene_bc_matrices/hg19/")
+# Initialize the Seurat object with the raw (non-normalized data).
+obj <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+obj
 
-# but contrary to chars symbols also stored in seqpools
-# show_rds(list('abc','abc',rlang::sym('abc'),rlang::sym('abc'),rlang::sym('abc1')))
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj)
+obj <- SketchData(
+  object = obj,
+  ncells = 500,
+  method = "LeverageScore",
+  sketched.assay = "sketch"
+)
+obj
 
-# which joined with pairlists makes things difficult
-# show_rds(pairlist(name1='val1',name2='val1',name2=rlang::sym('abc'),name2=rlang::sym('abc')))
+DefaultAssay(obj) <- "sketch"
+obj <- FindVariableFeatures(obj)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj)
+obj <- FindNeighbors(obj, dims = 1:50)
+obj <- FindClusters(obj, resolution = 2)
+
+obj@reductions$pca@assay.used
+obj@assays$sketch
+saveRDS(obj,'seu_sketch.rds')
+
+rownames(obj@meta.data) = NULL
+
+saveRDS(obj,'seu_sketch_no_cellnames.rds')
