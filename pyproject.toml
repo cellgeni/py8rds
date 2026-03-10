@@ -4,13 +4,13 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "py8rds"
+version = "1.0.0"
 authors = [{ name="Pasha Mazin", email="pm19@sanger.ac.uk" },
            { name = "Martin Prete", email = "mp33@sanger.ac.uk" }]
 description = "R Data Deserialization in python"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
-dynamic = ["version"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",

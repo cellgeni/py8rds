@@ -1,13 +1,16 @@
 import gzip
 import struct
 import logging
+from importlib.metadata import version
 import pandas as pd
 import anndata as ad
 from scipy import sparse
 import numpy as np
 from numpy.dtypes import StringDType
 
-__version__ = "0.0.1"
+
+__version__ = version("py8rds")
+
 INT_NA = -2147483648
 
 logging.basicConfig(level="DEBUG", format="[%(asctime)s][%(levelname)s] %(message)s")
