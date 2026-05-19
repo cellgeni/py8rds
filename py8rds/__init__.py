@@ -529,6 +529,14 @@ def parse_object(reader, rds: RdsFile):
     return robj
 
 
+def parse_size(reader):
+    size = struct.unpack(">I", reader.read(4))[0]
+    if size == 0xFFFFFFFF:  # LONG_VECTOR_SUPPORT
+        high, low = struct.unpack(">II", reader.read(8))
+        size = (high << 32) | low
+    return size
+
+
 def parse_S4SXP(reader, rds):
     return parse_object(reader, rds)  # S4 is stored as LISTSXP, so just continue
 
@@ -708,7 +716,7 @@ def parse_CHARSXP(reader):
 
 
 def parse_STRSXP(reader, rds):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = parse_size(reader)
     logging.debug(f"size       {size}")
     value = np.empty(size, dtype=StringDType(na_object=np.nan))
 
@@ -722,7 +730,7 @@ def parse_STRSXP(reader, rds):
 
 
 def parse_CPLXSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = parse_size(reader)
     logging.debug(f"size       {size}")
     value = np.zeros(size, dtype=np.complex128)
     for i in range(size):
@@ -733,7 +741,7 @@ def parse_CPLXSXP(reader):
 
 
 def parse_REALSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = parse_size(reader)
     logging.debug(f"size       {size}")
     value = np.frombuffer(reader.read(size * 8), dtype=">f8").astype(
         np.float64, copy=False
@@ -742,7 +750,7 @@ def parse_REALSXP(reader):
 
 
 def parse_INTSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = parse_size(reader)
     logging.debug(f"size       {size}")
     value = np.frombuffer(reader.read(size * 4), dtype=">i4").astype(
         np.int32, copy=False
@@ -769,7 +777,7 @@ def parse_LGLSXP(reader):
 
 
 def parse_VECSXP(reader, rds):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = parse_size(reader)
     logging.debug(f"size       {size}")
     value = []
     for _ in range(size):
@@ -783,7 +791,7 @@ def parse_EXPRSXP(reader, rds):
 
 
 def parse_RAWSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = parse_size(reader)
     logging.debug(f"size       {size}")
     raw = reader.read(size)
     return np.frombuffer(raw, dtype=np.uint8)
@@ -991,7 +999,7 @@ def _read_bc_consts(reader, reps, rds):
 
         if type_code == BCODESXP_CODE:
             logging.debug("BCODESXP const: nested BCODESXP")
-            const_val = _read_bc1(reader, reps)
+            const_val = _read_bc1(reader, reps, rds)
             nested = Robj()
             nested.value = const_val
             nested.attributes = [["sexptype", "BCODESXP"]]

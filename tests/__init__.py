@@ -8,7 +8,9 @@ import pandas as pd
 import py8rds
 
 import logging
-logging.disable(logging.CRITICAL) 
+
+logging.disable(logging.CRITICAL)
+
 
 class TestRdsParser(unittest.TestCase):
     EXPECTED_RDS_FILES = {
