@@ -249,6 +249,9 @@ def parse_object_header(reader):
     object_header = [reader.read(1) for _ in range(4)]
     if any(len(b) == 0 for b in object_header):
         raise EOFError("Unexpected end of file while reading object header")
+    if reader.bo == "<":
+        # flags are a single integer; normalise to big-endian byte order
+        object_header.reverse()
 
     header_bin = [f"{struct.unpack('>B', b)[0]:08b}" for b in object_header]
     logging.debug(f"header {header_bin}")
@@ -287,51 +290,180 @@ def parse_object_header(reader):
     }
 
 
+QS2_MAGIC = b"\x0b\x0e\x0a\xc1"
+QDATA_MAGIC = b"\x0b\x0e\x0a\xcd"
+QS_LEGACY_MAGIC = b"\x0b\x0e\x0a\x0c"
+QS2_MAX_BLOCKSIZE = 1048576
+QS2_SHUFFLE_MASK = 1 << 31
+QS2_SHUFFLE_ELEMSIZE = 8
+
+
+class ByteStream:
+    """Wraps a binary file object and keeps the byte order of the serialization stream ('>' for XDR, '<'/'>' for native binary)."""
+
+    def __init__(self, f):
+        self.f = f
+        self.read = f.read
+        self.tell = f.tell
+        self.bo = ">"
+
+    def close(self):
+        self.f.close()
+
+
+def _zstd_decompressor():
+    try:
+        from compression import zstd  # python >= 3.14
+
+        return zstd.decompress
+    except ImportError:
+        pass
+    try:
+        import zstandard
+    except ImportError:
+        raise ImportError("reading qs2 files requires the 'zstandard' package (pip install zstandard)")
+    dctx = zstandard.ZstdDecompressor()
+    return lambda data: dctx.decompress(data, max_output_size=QS2_MAX_BLOCKSIZE)
+
+
+class Qs2Reader:
+    """File-like reader of qs2 files (qs2::qs_save), see https://github.com/qsbase/qs2.
+    File is 24 bytes header followed by zstd compressed blocks (uint32 compressed size, highest bit marks byte-shuffled blocks)
+    that together contain a standard R serialization stream (native binary format).
+    """
+
+    def __init__(self, file_path):
+        self.f = open(file_path, "rb")
+        header = self.f.read(24)
+        if len(header) < 24 or header[:4] != QS2_MAGIC:
+            self.f.close()
+            raise ValueError(f"{file_path} is not a qs2 file")
+        format_version, compression, endian, shuffle = header[4:8]
+        logging.debug(f"qs2 format version {format_version}; compression {compression}; endian {endian}; shuffle {shuffle}")
+        if format_version > 1:
+            logging.warning(f"qs2 format version {format_version} is newer than supported (1)")
+        if compression != 1:
+            self.f.close()
+            raise NotImplementedError(f"Unknown qs2 compression algorithm '{compression}'")
+        # blocks sizes are written in native order of the machine that saved the file
+        self.file_bo = ">" if endian == 1 else "<"
+        self.bo = ">"
+        self._decompress = _zstd_decompressor()
+        self._buf = b""
+        self._pos = 0
+        self._offset = 0  # decompressed bytes preceding current block
+
+    def _next_block(self):
+        zsize_bytes = self.f.read(4)
+        if len(zsize_bytes) < 4:
+            return False
+        zsize = struct.unpack(self.file_bo + "I", zsize_bytes)[0]
+        shuffled = bool(zsize & QS2_SHUFFLE_MASK)
+        zsize &= ~QS2_SHUFFLE_MASK
+        zblock = self.f.read(zsize)
+        if len(zblock) != zsize:
+            raise EOFError("Unexpected end of qs2 file while reading block")
+        block = self._decompress(zblock)
+        if shuffled:
+            # undo blosc byte-shuffle (element size 8), trailing bytes are not shuffled
+            n = len(block) - len(block) % QS2_SHUFFLE_ELEMSIZE
+            unshuffled = np.frombuffer(block, dtype=np.uint8, count=n).reshape(QS2_SHUFFLE_ELEMSIZE, -1).T.tobytes()
+            block = unshuffled + block[n:]
+        self._offset += len(self._buf)
+        self._buf = block
+        self._pos = 0
+        return True
+
+    def read(self, n):
+        end = self._pos + n
+        if end <= len(self._buf):
+            out = self._buf[self._pos : end]
+            self._pos = end
+            return out
+        parts = [self._buf[self._pos :]]
+        need = n - len(parts[0])
+        self._pos = len(self._buf)
+        while need > 0 and self._next_block():
+            part = self._buf[:need]
+            parts.append(part)
+            self._pos = len(part)
+            need -= len(part)
+        return b"".join(parts)
+
+    def tell(self):
+        return self._offset + self._pos
+
+    def close(self):
+        self.f.close()
+
+
+def _open_stream(file_path):
+    with open(file_path, "rb") as f:
+        magic_number = f.read(4)
+
+    if magic_number[:2] == b"\x1f\x8b":
+        logging.debug("RDS is compressed")
+        return ByteStream(gzip.open(file_path, "rb"))
+    if magic_number == QS2_MAGIC:
+        logging.debug("qs2 format detected")
+        return Qs2Reader(file_path)
+    if magic_number == QDATA_MAGIC:
+        raise NotImplementedError("qdata format (qs2::qd_save) is not supported, use qs2::qs_save")
+    if magic_number == QS_LEGACY_MAGIC:
+        raise NotImplementedError("legacy qs format (qs::qsave) is not supported, use qs2::qs_save")
+    return ByteStream(open(file_path, "rb"))
+
+
+def _parse_r_version(reader):
+    v = struct.unpack(reader.bo + "I", reader.read(4))[0]
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+
+
 def parse_rds(file_path: str) -> Robj:
+    """Reads RDS (saveRDS, any compression supported by gzip or uncompressed) or qs2 (qs2::qs_save) file"""
     logging.info(f"Reading {file_path}")
     # clean seqpool before parsing new file
     rds = RdsFile()
-    with open(file_path, "rb") as f:
-        magic_number = f.read(2)
+    reader = _open_stream(file_path)
+    try:
+        logging.debug("---> start of file header")
+        format = reader.read(2)
+        if format == b"X\n":
+            logging.debug("XDR binary format detected")
+            reader.bo = ">"
+        elif format == b"A\n":
+            raise NotImplementedError("ASCII format detected")
+        elif format == b"B\n":
+            logging.debug("Native word-order binary format detected")
+            # format version is 2 or 3, so its first byte is non-zero only if stream is little-endian
+            version_bytes = reader.read(4)
+            reader.bo = "<" if version_bytes[0] != 0 else ">"
+        else:
+            raise NotImplementedError(f"Unknown Format '{format}'")
 
-    if magic_number == b"\x1f\x8b":
-        logging.debug("RDS is compressed")
-        reader = gzip.open(file_path, "rb")
-    else:
-        reader = open(file_path, "rb")
+        if format == b"X\n":
+            version_bytes = reader.read(4)
+        rds.format_version = struct.unpack(reader.bo + "I", version_bytes)[0]
+        logging.debug(f"version: {rds.format_version}")
 
-    logging.debug("---> start of file header")
-    format = reader.read(2)
-    if format == b"X\n":
-        logging.debug("XDR binary format detected")
-    elif format == b"A\n":
-        raise NotImplementedError("ASCII format detected")
-    elif format == b"B\n":
-        raise NotImplementedError("Native word-order binary format detected")
-    else:
-        raise NotImplementedError(f"Unknown Format '{format}'")
+        rds.writer_version = _parse_r_version(reader)
+        logging.debug(f"version of R which wrote the file: {'.'.join(map(str, rds.writer_version))}")
 
-    rds.format_version = struct.unpack(">I", reader.read(4))[0]
-    logging.debug(f"version: {rds.format_version}")
+        rds.reader_version = _parse_r_version(reader)
+        logging.debug(
+            f"minimal version of R needed to read the format: {'.'.join(map(str, rds.reader_version))}"
+        )
 
-    rds.writer_version = struct.unpack("BBB", reader.read(4)[1:])
-    logging.debug(
-        f"version of R which wrote the file: {'.'.join(map(str, rds.writer_version))}"
-    )
+        if rds.format_version == 3:
+            encoding_length = struct.unpack(reader.bo + "I", reader.read(4))[0]
+            rds.encoding = reader.read(encoding_length).decode()
+            logging.debug(f"encoding: {rds.encoding}")
 
-    rds.reader_version = struct.unpack("BBB", reader.read(4)[1:])
-    logging.debug(
-        f"minimal version of R needed to read the format: {'.'.join(map(str, rds.reader_version))}"
-    )
+        logging.debug("<--- end of file header")
 
-    if rds.format_version == 3:
-        encoding_length = struct.unpack(">I", reader.read(4))[0]
-        rds.encoding = reader.read(encoding_length).decode()
-        logging.debug(f"encoding: {rds.encoding}")
-
-    logging.debug("<--- end of file header")
-
-    rds.object = parse_object(reader, rds)
+        rds.object = parse_object(reader, rds)
+    finally:
+        reader.close()
     logging.info(f"Done reading {file_path}")
     return rds.object
 
@@ -530,9 +662,9 @@ def parse_object(reader, rds: RdsFile):
 
 
 def parse_size(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = struct.unpack(reader.bo + "I", reader.read(4))[0]
     if size == 0xFFFFFFFF:  # LONG_VECTOR_SUPPORT
-        high, low = struct.unpack(">II", reader.read(8))
+        high, low = struct.unpack(reader.bo + "II", reader.read(8))
         size = (high << 32) | low
     return size
 
@@ -609,13 +741,13 @@ def parse_NAMESPACESXP(reader, rds):
     """
 
     # Placeholder (should be 0).
-    placeholder = struct.unpack(">i", reader.read(4))[0]
+    placeholder = struct.unpack(reader.bo + "i", reader.read(4))[0]
     logging.debug(f"NAMESPACESXP placeholder: {placeholder}")
     if placeholder != 0:
         logging.warning(f"NAMESPACESXP: expected placeholder 0 but found {placeholder}")
 
     # Length of the string vector.
-    length = struct.unpack(">i", reader.read(4))[0]
+    length = struct.unpack(reader.bo + "i", reader.read(4))[0]
     logging.debug(f"NAMESPACESXP string vector length: {length}")
 
     strings = []
@@ -689,7 +821,7 @@ def parse_ALTREP(reader, rds):
 
 
 def parse_CHARSXP(reader):
-    size = struct.unpack(">i", reader.read(4))[0]
+    size = struct.unpack(reader.bo + "i", reader.read(4))[0]
     logging.debug(f"size       {size}")
 
     if size == -1:
@@ -734,8 +866,8 @@ def parse_CPLXSXP(reader):
     logging.debug(f"size       {size}")
     value = np.zeros(size, dtype=np.complex128)
     for i in range(size):
-        real = struct.unpack(">d", reader.read(8))[0]
-        imag = struct.unpack(">d", reader.read(8))[0]
+        real = struct.unpack(reader.bo + "d", reader.read(8))[0]
+        imag = struct.unpack(reader.bo + "d", reader.read(8))[0]
         value[i] = complex(real, imag)
     return value
 
@@ -743,7 +875,7 @@ def parse_CPLXSXP(reader):
 def parse_REALSXP(reader):
     size = parse_size(reader)
     logging.debug(f"size       {size}")
-    value = np.frombuffer(reader.read(size * 8), dtype=">f8").astype(
+    value = np.frombuffer(reader.read(size * 8), dtype=reader.bo + "f8").astype(
         np.float64, copy=False
     )
     return value
@@ -752,14 +884,14 @@ def parse_REALSXP(reader):
 def parse_INTSXP(reader):
     size = parse_size(reader)
     logging.debug(f"size       {size}")
-    value = np.frombuffer(reader.read(size * 4), dtype=">i4").astype(
+    value = np.frombuffer(reader.read(size * 4), dtype=reader.bo + "i4").astype(
         np.int32, copy=False
     )
     return value
 
 
 def parse_BUILTINSXP(reader):
-    size = struct.unpack(">I", reader.read(4))[0]
+    size = struct.unpack(reader.bo + "I", reader.read(4))[0]
     logging.debug(f"size       {size}")
     value = reader.read(size).decode()
     return value
@@ -846,7 +978,7 @@ def parse_ENVSXP(reader, rds):
     """
 
     # locked flag
-    locked = struct.unpack(">i", reader.read(4))[0]
+    locked = struct.unpack(reader.bo + "i", reader.read(4))[0]
     logging.debug(f"ENVSXP locked flag: {locked}")
 
     # ENCLOS: enclosing environment
@@ -948,7 +1080,7 @@ def parse_BCODESXP(reader, rds):
     """
 
     # ---- reps length (for shared subtrees in bytecode language) ----
-    reps_len = struct.unpack(">i", reader.read(4))[0]
+    reps_len = struct.unpack(reader.bo + "i", reader.read(4))[0]
     logging.debug(f"BCODESXP: reps_len = {reps_len}")
     reps = [None] * max(reps_len, 0)
 
@@ -989,12 +1121,12 @@ def _read_bc1(reader, reps, rds):
 
 
 def _read_bc_consts(reader, reps, rds):
-    n = struct.unpack(">i", reader.read(4))[0]
+    n = struct.unpack(reader.bo + "i", reader.read(4))[0]
     logging.debug(f"BCODESXP consts: n = {n}")
 
     consts = []
     for i in range(n):
-        type_code = struct.unpack(">i", reader.read(4))[0]
+        type_code = struct.unpack(reader.bo + "i", reader.read(4))[0]
         logging.debug(f"BCODESXP const[{i}] type_code = {type_code}")
 
         if type_code == BCODESXP_CODE:
@@ -1048,7 +1180,7 @@ def _read_bc_lang(reader, type_code, reps, rds):
 
     # 1. BCREPREF: reference to an existing node in 'reps'
     if type_code == BCREPREF_CODE:
-        idx = struct.unpack(">i", reader.read(4))[0]
+        idx = struct.unpack(reader.bo + "i", reader.read(4))[0]
         logging.debug(f"ReadBCLang: BCREPREF idx={idx}")
         if 0 <= idx < len(reps):
             return reps[idx]
@@ -1074,8 +1206,8 @@ def _read_bc_lang(reader, type_code, reps, rds):
 
     if t == BCREPDEF_CODE:
         # BCREPDEF: first int is position, second is underlying type
-        pos = struct.unpack(">i", reader.read(4))[0]
-        t = struct.unpack(">i", reader.read(4))[0]
+        pos = struct.unpack(reader.bo + "i", reader.read(4))[0]
+        t = struct.unpack(reader.bo + "i", reader.read(4))[0]
         logging.debug(f"ReadBCLang: BCREPDEF pos={pos}, inner_type={t}")
 
     # Handle "attribute-wrapped" types.
@@ -1102,11 +1234,11 @@ def _read_bc_lang(reader, type_code, reps, rds):
     tag_robj = parse_object(reader, rds)
 
     logging.debug("ReadBCLang: reading CAR type")
-    car_type = struct.unpack(">i", reader.read(4))[0]
+    car_type = struct.unpack(reader.bo + "i", reader.read(4))[0]
     car_val = _read_bc_lang(reader, car_type, reps, rds)
 
     logging.debug("ReadBCLang: reading CDR type")
-    cdr_type = struct.unpack(">i", reader.read(4))[0]
+    cdr_type = struct.unpack(reader.bo + "i", reader.read(4))[0]
     cdr_val = _read_bc_lang(reader, cdr_type, reps, rds)
 
     # Store this node in 'reps' if it was a BCREPDEF

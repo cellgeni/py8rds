@@ -22,6 +22,7 @@ dependencies = [
     "anndata",
     "scipy",
     "numpy",
+    "zstandard; python_version < '3.14'",
 ]
 
 [project.urls]

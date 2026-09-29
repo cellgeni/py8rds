@@ -23,6 +23,7 @@ adata = py8rds.as_anndata('seurat.rds')
 robj = py8rds.parse_rds('data.rds')
 robj.show()
 ```
+All functions also accept [qs2](https://github.com/qsbase/qs2) files saved by `qs2::qs_save` (file format is detected automatically). Files saved by `qs2::qd_save` (qdata format) or by the legacy `qs::qsave` are not supported.
 Please see the [tutorial](tutorials/tutorial.ipynb).
 
 
