@@ -248,7 +248,10 @@ class TestRdsParser(unittest.TestCase):
         # file -> (layer, csv with the layer after JoinLayers)
         cases = {
             "seu_split.rds": ("data", "seu_split_joined_data.csv"),
-            "seu_split_diff_features.rds": ("counts", "seu_split_diff_features_joined_counts.csv"),
+            "seu_split_diff_features.rds": (
+                "counts",
+                "seu_split_diff_features_joined_counts.csv",
+            ),
         }
         for filename, (layer, joined_csv) in sorted(cases.items()):
             with self.subTest(filename=filename):

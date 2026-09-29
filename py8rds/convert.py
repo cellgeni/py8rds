@@ -162,7 +162,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
     1. specified assay/layer as data
     2. cell metadata
     3. var metadata if any
-    4. all reduced dimensions assotiated with given assay
+    4. all reduced dimensions associated with given assay
 
     Parameters
     ----------
@@ -196,7 +196,8 @@ def seurat2adata(robj, assay=0, layer="counts"):
     # try Assay5
     else:
         adata = _assay5_layer2adata(robj.get(["assays", assay]), layer)
-        var = pd.DataFrame(index=adata.var_names)
+        var = as_data_frame(robj.get(["assays", assay, "meta.data"]))
+        var.index = adata.var_names
 
     # try to keep dimnames if they are missed in obs/var
     if is_default_index(obs) and (obs.shape[0] == adata.shape[0]):
@@ -346,11 +347,12 @@ def _assay5_layer2adata(assay, layer):
 
     layer_cells = [_logmap_names(assay.get("cells"), name) for name in layers]
     # split layers are made from one matrix, so each cell belongs to exactly one of them
+    # calculate total number of cells in all layers and compare to number of unique cells
     n_cells = sum(len(c) for c in layer_cells)
     if len(layers) > 1 and len(np.unique(np.concatenate(layer_cells))) < n_cells:
         raise ValueError(
-            f"Layer '{layer}' not found in assay and layers {layers} cannot be concatenated as they share cells.\n"
-            f"Please specify one of them, for example py8rds.seurat2adata(srds,layer='{layers[0]}')"
+            f"Layer '{layer}' not found in assay. Supposedly split layers {layers} cannot be concatenated as they share cells.\n"
+            f"Please specify one of them, for example py8rds.seurat2adata(srds,layer='{layers[0]}') or select different assay/layer"
         )
 
     adatas = []
@@ -364,11 +366,13 @@ def _assay5_layer2adata(assay, layer):
 
     logging.info(f"Concatenating split layers: {layers}")
     adata = ad.concat(adatas, join="outer", fill_value=0)
+
+    del adatas
+    # fix order, it should also fail with any cells/features are missed (that should not happen)
     all_cells = assay.get(["cells", "dimnames", 0]).value
     all_features = assay.get(["features", "dimnames", 0]).value
-    cells = all_cells[np.isin(all_cells, adata.obs_names)]
-    features = all_features[np.isin(all_features, adata.var_names)]
-    return adata[cells, features].copy()
+    adata = adata[all_cells, all_features].copy()
+    return adata
 
 
 def _dgCMatrix2numpy(robj):
