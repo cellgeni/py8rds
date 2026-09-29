@@ -1,6 +1,4 @@
 import pandas as pd
-import anndata as ad
-from scipy import sparse
 import numpy as np
 from numpy.dtypes import StringDType
 
@@ -125,6 +123,8 @@ def as_anndata(robj):
     as_anndata(robj)
     as_anndata("data.rds")
     """
+    import anndata as ad  # imported lazily as it is slow to import
+
     if isinstance(robj, str):
         robj = parse_rds(robj)
     X = as_numpy(robj).T
@@ -332,6 +332,8 @@ def _array2numpy(robj):
 
 
 def _dgCMatrix2numpy(robj):
+    from scipy import sparse  # imported lazily as it is slow to import
+
     i = robj.get("i").value
     p = robj.get("p").value
     dim = robj.get("Dim").value
