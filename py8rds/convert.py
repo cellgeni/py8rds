@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 import numpy as np
 from numpy.dtypes import StringDType
@@ -167,7 +168,8 @@ def seurat2adata(robj, assay=0, layer="counts"):
     ----------
     robj : Robj or str (path to an RDS file)
     assay : int or string - assay index or name
-    layer : str - name of the layer to use
+    layer : str - name of the layer to use. For Assay5, if there is no such layer, split layers ({layer}.1, {layer}.2, ...)
+        are concatenated, as Seurat::JoinLayers does
 
     Returns
     -------
@@ -189,30 +191,12 @@ def seurat2adata(robj, assay=0, layer="counts"):
     obs = as_data_frame(robj.get("meta.data"))
 
     if cnts is not None:
+        adata = as_anndata(cnts)
         var = as_data_frame(robj.get(["assays", assay, "meta.features"]))
     # try Assay5
     else:
-        names = robj.get(["assays", assay, "layers", "names"]).value
-        layer_idx = np.where(names == layer)[0]
-        if layer_idx.size == 0:
-            raise ValueError(
-                f"Layer '{layer}' not found in assay {assay}.\n"
-                f"Following layers are available: {names}.\n"
-                f"You can try something like py8rds.seurat2adata(srds,layer='{names[0]}')"
-            )
-        layer_idx = int(layer_idx[0])
-        cnts = robj.get(["assays", assay, "layers", layer_idx])
-        var = pd.DataFrame(
-            index=robj.get(["assays", 0, "features", "dimnames", 0]).value
-        )
-
-    adata = as_anndata(cnts)
-
-    # try to get obs names from assay if they absent in layer
-    if is_default_index(adata.obs):
-        obs_names = robj.get(["assays", assay, "cells", "dimnames", 0])
-        if (obs_names is not None) and (len(obs_names.value) == adata.shape[0]):
-            adata.obs_names = obs_names.value
+        adata = _assay5_layer2adata(robj.get(["assays", assay]), layer)
+        var = pd.DataFrame(index=adata.var_names)
 
     # try to keep dimnames if they are missed in obs/var
     if is_default_index(obs) and (obs.shape[0] == adata.shape[0]):
@@ -331,6 +315,60 @@ def _array2numpy(robj):
         dim = dim.value
     X = np.array(robj.value).reshape(dim, order="F")
     return X
+
+
+def _logmap_names(logmap, name):
+    """Returns row names of a SeuratObject LogMap that are TRUE in column `name`"""
+    rownames, colnames = (d.value for d in logmap.get("dimnames").value)
+    mask = np.asarray(logmap.value).reshape(logmap.get("dim").value, order="F")
+    return rownames[mask[:, colnames.tolist().index(name)]]
+
+
+def _assay5_layer2adata(assay, layer):
+    """
+    Converts a layer of a Seurat Assay5 into AnnData, taking cell and feature names from the assay.
+    If there is no such layer but there are split layers ({layer}.1, {layer}.2, ...),
+    they are concatenated (missing features are filled by zeros) and cells are ordered as in the assay.
+    """
+    import anndata as ad  # imported lazily as it is slow to import
+
+    names = assay.get(["layers", "names"]).value.tolist()
+    if layer in names:
+        layers = [layer]
+    else:
+        layers = [n for n in names if n.startswith(layer + ".")]
+    if not layers:
+        raise ValueError(
+            f"Layer '{layer}' not found in assay.\n"
+            f"Following layers are available: {names}.\n"
+            f"You can try something like py8rds.seurat2adata(srds,layer='{names[0]}')"
+        )
+
+    layer_cells = [_logmap_names(assay.get("cells"), name) for name in layers]
+    # split layers are made from one matrix, so each cell belongs to exactly one of them
+    n_cells = sum(len(c) for c in layer_cells)
+    if len(layers) > 1 and len(np.unique(np.concatenate(layer_cells))) < n_cells:
+        raise ValueError(
+            f"Layer '{layer}' not found in assay and layers {layers} cannot be concatenated as they share cells.\n"
+            f"Please specify one of them, for example py8rds.seurat2adata(srds,layer='{layers[0]}')"
+        )
+
+    adatas = []
+    for name, cells in zip(layers, layer_cells):
+        adata = as_anndata(assay.get(["layers", names.index(name)]))
+        adata.obs_names = cells
+        adata.var_names = _logmap_names(assay.get("features"), name)
+        adatas.append(adata)
+    if len(adatas) == 1:
+        return adatas[0]
+
+    logging.info(f"Concatenating split layers: {layers}")
+    adata = ad.concat(adatas, join="outer", fill_value=0)
+    all_cells = assay.get(["cells", "dimnames", 0]).value
+    all_features = assay.get(["features", "dimnames", 0]).value
+    cells = all_cells[np.isin(all_cells, adata.obs_names)]
+    features = all_features[np.isin(all_features, adata.var_names)]
+    return adata[cells, features].copy()
 
 
 def _dgCMatrix2numpy(robj):

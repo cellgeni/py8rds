@@ -25,6 +25,9 @@ class TestRdsParser(unittest.TestCase):
         "regular_sequence.rds",
         "seu_sketch.rds",
         "seu_sketch_no_cellnames.rds",
+        "seu_split.rds",
+        "seu_split_diff_features.rds",
+        "seu_overlapping_layers.rds",
     }
     SEURAT_RDS_FILES = {"seu_sketch.rds", "seu_sketch_no_cellnames.rds"}
     # qs2 file -> rds file with the same object
@@ -240,6 +243,33 @@ class TestRdsParser(unittest.TestCase):
                 self.assertIn("pca", adata_by_name.obsm)
                 self.assertEqual(adata_by_name.obsm["pca"].shape[0], 500)
                 self.assertGreater(adata_by_name.obsm["pca"].shape[1], 0)
+
+    def test_seurat2adata_split_layers_equal_join_layers(self):
+        # file -> (layer, csv with the layer after JoinLayers)
+        cases = {
+            "seu_split.rds": ("data", "seu_split_joined_data.csv"),
+            "seu_split_diff_features.rds": ("counts", "seu_split_diff_features_joined_counts.csv"),
+        }
+        for filename, (layer, joined_csv) in sorted(cases.items()):
+            with self.subTest(filename=filename):
+                adata = py8rds.seurat2adata(self._path(filename), layer=layer)
+                joined = pd.read_csv(self._path(joined_csv), index_col=0).T
+                self.assertListEqual(adata.obs_names.tolist(), joined.index.tolist())
+                self.assertListEqual(adata.var_names.tolist(), joined.columns.tolist())
+                self.assertTrue(np.allclose(adata.X.toarray(), joined.values))
+
+    def test_seurat2adata_single_split_layer(self):
+        adata = py8rds.seurat2adata(self._path("seu_split.rds"), layer="counts.A")
+        self.assertListEqual(adata.obs_names.tolist(), ["c2", "c6", "c10"])
+        self.assertListEqual(adata.obs["batch"].tolist(), ["A", "A", "A"])
+        self.assertEqual(adata.shape[1], 20)
+
+    def test_seurat2adata_overlapping_layers_are_not_concatenated(self):
+        path = self._path("seu_overlapping_layers.rds")
+        with self.assertRaisesRegex(ValueError, "share cells"):
+            py8rds.seurat2adata(path, layer="counts")
+        adata = py8rds.seurat2adata(path, layer="counts.filtered")
+        self.assertEqual(adata.shape, (6, 15))
 
 
 if __name__ == "__main__":

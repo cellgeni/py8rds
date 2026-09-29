@@ -79,3 +79,23 @@ rownames(obj@meta.data) = NULL
 
 saveRDS(obj,'seu_sketch_no_cellnames.rds')
 qs2::qs_save(obj,'seu_sketch_no_cellnames.qs2')
+
+# Assay5 with split layers
+set.seed(1)
+m <- matrix(rpois(20*12, 2), 20, 12, dimnames=list(paste0("g",1:20), paste0("c",1:12)))
+m <- as(m, "dgCMatrix")
+obj <- CreateSeuratObject(m)
+obj$batch <- rep(c("B","A","B","C"), 3)
+obj[["RNA"]] <- split(obj[["RNA"]], f = obj$batch)
+obj <- NormalizeData(obj)
+saveRDS(obj,'seu_split.rds')
+write.csv(as.matrix(LayerData(JoinLayers(obj), "data")), "seu_split_joined_data.csv")
+
+# split layers with different features
+obj <- CreateSeuratObject(CreateAssay5Object(counts = list(m[1:15, 1:6], m[6:20, 7:12])))
+saveRDS(obj,'seu_split_diff_features.rds')
+write.csv(as.matrix(LayerData(JoinLayers(obj), "counts")), "seu_split_diff_features_joined_counts.csv")
+
+# layers sharing cells, they are not split layers and cannot be concatenated
+obj <- CreateSeuratObject(CreateAssay5Object(counts = list(raw = m, filtered = m[1:15, 1:6])))
+saveRDS(obj,'seu_overlapping_layers.rds')
