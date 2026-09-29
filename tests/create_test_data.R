@@ -43,6 +43,8 @@ saveRDS(a,'environment.rds')
 
 # Seurat  ########
 # with sketch
+# need Seurat >= 5.0.0
+.libPaths("/software/cellgen/cellgeni/renvs/libs/sc/linux-ubuntu-noble/R-4.5/x86_64-pc-linux-gnu")
 library(Seurat)
 curl::curl_download('https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz',destfile = 'pbmc3k_filtered_gene_bc_matrices.tar.gz')
 system("tar -xzf pbmc3k_filtered_gene_bc_matrices.tar.gz")
