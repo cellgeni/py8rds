@@ -191,7 +191,9 @@ class TestRdsParser(unittest.TestCase):
             py8rds.as_data_frame(self._path("data.frame_with_rownames.rds")),
             py8rds.as_data_frame(self._path("data.frame_with_rownames.qs2")),
         )
-        adata = py8rds.seurat2adata(self._path("seu_sketch_no_cellnames.qs2"), assay="RNA")
+        adata = py8rds.seurat2adata(
+            self._path("seu_sketch_no_cellnames.qs2"), assay="RNA"
+        )
         self.assertEqual(adata.shape, (2700, 13714))
 
     def test_seurat2adata_rna_assay_by_name_and_index(self):

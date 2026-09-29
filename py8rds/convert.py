@@ -195,9 +195,11 @@ def seurat2adata(robj, assay=0, layer="counts"):
         names = robj.get(["assays", assay, "layers", "names"]).value
         layer_idx = np.where(names == layer)[0]
         if layer_idx.size == 0:
-            raise ValueError(f"Layer '{layer}' not found in assay {assay}.\n"
-                             f"Following layers are available: {names}.\n"
-                             f"You can try something like py8rds.seurat2adata(srds,layer='{names[0]}')")
+            raise ValueError(
+                f"Layer '{layer}' not found in assay {assay}.\n"
+                f"Following layers are available: {names}.\n"
+                f"You can try something like py8rds.seurat2adata(srds,layer='{names[0]}')"
+            )
         layer_idx = int(layer_idx[0])
         cnts = robj.get(["assays", assay, "layers", layer_idx])
         var = pd.DataFrame(

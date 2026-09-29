@@ -127,7 +127,9 @@ def parse_rds(file_path: str) -> Robj:
         logging.debug(f"version: {rds.format_version}")
 
         rds.writer_version = _parse_r_version(reader)
-        logging.debug(f"version of R which wrote the file: {'.'.join(map(str, rds.writer_version))}")
+        logging.debug(
+            f"version of R which wrote the file: {'.'.join(map(str, rds.writer_version))}"
+        )
 
         rds.reader_version = _parse_r_version(reader)
         logging.debug(

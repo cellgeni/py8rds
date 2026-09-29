@@ -35,7 +35,9 @@ def _zstd_decompressor():
     try:
         import zstandard
     except ImportError:
-        raise ImportError("reading qs2 files requires the 'zstandard' package (pip install zstandard)")
+        raise ImportError(
+            "reading qs2 files requires the 'zstandard' package (pip install zstandard)"
+        )
     dctx = zstandard.ZstdDecompressor()
     return lambda data: dctx.decompress(data, max_output_size=QS2_MAX_BLOCKSIZE)
 
@@ -53,12 +55,18 @@ class Qs2Reader:
             self.f.close()
             raise ValueError(f"{file_path} is not a qs2 file")
         format_version, compression, endian, shuffle = header[4:8]
-        logging.debug(f"qs2 format version {format_version}; compression {compression}; endian {endian}; shuffle {shuffle}")
+        logging.debug(
+            f"qs2 format version {format_version}; compression {compression}; endian {endian}; shuffle {shuffle}"
+        )
         if format_version > 1:
-            logging.warning(f"qs2 format version {format_version} is newer than supported (1)")
+            logging.warning(
+                f"qs2 format version {format_version} is newer than supported (1)"
+            )
         if compression != 1:
             self.f.close()
-            raise NotImplementedError(f"Unknown qs2 compression algorithm '{compression}'")
+            raise NotImplementedError(
+                f"Unknown qs2 compression algorithm '{compression}'"
+            )
         # blocks sizes are written in native order of the machine that saved the file
         self.file_bo = ">" if endian == 1 else "<"
         self.bo = ">"
@@ -81,7 +89,11 @@ class Qs2Reader:
         if shuffled:
             # undo blosc byte-shuffle (element size 8), trailing bytes are not shuffled
             n = len(block) - len(block) % QS2_SHUFFLE_ELEMSIZE
-            unshuffled = np.frombuffer(block, dtype=np.uint8, count=n).reshape(QS2_SHUFFLE_ELEMSIZE, -1).T.tobytes()
+            unshuffled = (
+                np.frombuffer(block, dtype=np.uint8, count=n)
+                .reshape(QS2_SHUFFLE_ELEMSIZE, -1)
+                .T.tobytes()
+            )
             block = unshuffled + block[n:]
         self._offset += len(self._buf)
         self._buf = block
@@ -122,7 +134,11 @@ def _open_stream(file_path):
         logging.debug("qs2 format detected")
         return Qs2Reader(file_path)
     if magic_number == QDATA_MAGIC:
-        raise NotImplementedError("qdata format (qs2::qd_save) is not supported, use qs2::qs_save")
+        raise NotImplementedError(
+            "qdata format (qs2::qd_save) is not supported, use qs2::qs_save"
+        )
     if magic_number == QS_LEGACY_MAGIC:
-        raise NotImplementedError("legacy qs format (qs::qsave) is not supported, use qs2::qs_save")
+        raise NotImplementedError(
+            "legacy qs format (qs::qsave) is not supported, use qs2::qs_save"
+        )
     return ByteStream(open(file_path, "rb"))

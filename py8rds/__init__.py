@@ -22,7 +22,14 @@ _CONVERTERS = {
     "is_default_index",
 }
 
-__all__ = ["INT_NA", "Robj", "RdsFile", "parse_rds", "parse_object", *sorted(_CONVERTERS)]
+__all__ = [
+    "INT_NA",
+    "Robj",
+    "RdsFile",
+    "parse_rds",
+    "parse_object",
+    *sorted(_CONVERTERS),
+]
 
 
 def __getattr__(name):
