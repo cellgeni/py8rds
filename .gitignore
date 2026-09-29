@@ -161,4 +161,8 @@ cython_debug/
 
 
 .DS_Store
+local_work/
 test_rds
+*.rds
+*.RDS
+*.Rds
