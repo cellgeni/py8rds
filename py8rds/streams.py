@@ -82,6 +82,9 @@ class Qs2Reader:
         zsize = struct.unpack(self.file_bo + "I", zsize_bytes)[0]
         shuffled = bool(zsize & QS2_SHUFFLE_MASK)
         zsize &= ~QS2_SHUFFLE_MASK
+        max_zsize = QS2_MAX_BLOCKSIZE + QS2_MAX_BLOCKSIZE // 256
+        if not 0 < zsize <= max_zsize:
+            raise ValueError(f"Invalid qs2 compressed block size: {zsize}")
         zblock = self.f.read(zsize)
         if len(zblock) != zsize:
             raise EOFError("Unexpected end of qs2 file while reading block")
