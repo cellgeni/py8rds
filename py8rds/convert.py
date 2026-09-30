@@ -193,13 +193,21 @@ def seurat2adata(robj, assay=0, layer="counts"):
     if cnts is not None:
         adata = as_anndata(cnts)
         var = as_data_frame(robj.get(["assays", assay, "meta.features"]))
+        if is_default_index(var):
+            var.index = adata.var_names
     # try Assay5
     else:
         adata = _assay5_layer2adata(robj.get(["assays", assay]), layer)
-        var = as_data_frame(robj.get(["assays", assay, "meta.data"]))
-        var.index = adata.var_names
 
-    # try to keep dimnames if they are missed in obs/var
+        var = as_data_frame(robj.get(["assays", assay, "meta.data"]))
+        var.index = robj.get(["assays", assay, "features", "dimnames", 0]).value
+        if var.shape[0] != adata.shape[1]:
+            logging.warning(
+                f"Number of features in assay {assay} ({var.shape[0]}) does not match number of features in layer '{layer}' ({adata.shape[1]}). Subsetting features to match layer."
+            )
+        var = var.loc[adata.var_names, :]
+
+    #try to keep dimnames if they are missed in obs. There are some weird cases...
     if is_default_index(obs) and (obs.shape[0] == adata.shape[0]):
         obs.index = adata.obs_names
 
@@ -208,12 +216,15 @@ def seurat2adata(robj, assay=0, layer="counts"):
         obs_names = robj.get(["active.ident", "names"]).value
         if obs.shape[0] == len(obs_names):
             obs.index = obs_names
-
-    if is_default_index(var):
-        var.index = adata.var_names
-
-    if not is_default_index(obs) and not is_default_index(adata.obs):
-        obs = obs.loc[adata.obs_names, :]
+    
+    # make sure obs are the same
+    if adata.shape[0] != obs.shape[0]:
+        if is_default_index(obs) or is_default_index(adata.obs):
+            raise ValueError("Incompatible shapes between AnnData and meta.data, and at least one of them has default index. Cannot subset.")
+        logging.warning(
+            f"Number of cells in layer '{layer}' ({adata.shape[0]}) does not match number of cells in meta.data ({obs.shape[0]}). Subsetting meta.data to match layer."
+    )
+    obs = obs.loc[adata.obs_names, :]
 
     adata.obs = obs
     adata.var = var
@@ -226,9 +237,19 @@ def seurat2adata(robj, assay=0, layer="counts"):
         for i in range(len(rdims_names)):
             assay_used = rdims.get([i, "assay.used", 0])
             if (assay_used is None) or assay_used == assay_names[assay]:
-                adata.obsm[rdims_names[i]] = _array2numpy(
-                    rdims.get([i, "cell.embeddings"])
-                )
+                embedding = _array2numpy(rdims.get([i, "cell.embeddings"]))
+                cell_names = rdims.get([i, "cell.embeddings", "dimnames", 0])
+                if cell_names is not None:
+                    embedding = (
+                        pd.DataFrame(embedding, index=cell_names.value)
+                        .loc[adata.obs_names]
+                        .to_numpy()
+                    )
+                if embedding.shape[0] != adata.shape[0]:
+                    raise ValueError(
+                        f"Number of cells in reduced dimension '{rdims_names[i]}' ({embedding.shape[0]}) does not match number of cells in AnnData ({adata.shape[0]})."
+                    )
+                adata.obsm[rdims_names[i]] = embedding
 
     return adata
 
@@ -329,7 +350,7 @@ def _assay5_layer2adata(assay, layer):
     """
     Converts a layer of a Seurat Assay5 into AnnData, taking cell and feature names from the assay.
     If there is no such layer but there are split layers ({layer}.1, {layer}.2, ...),
-    they are concatenated (missing features are filled by zeros) and cells are ordered as in the assay.
+    they are concatenated (missing features are filled by zeros).
     """
     import anndata as ad  # imported lazily as it is slow to import
 
@@ -366,12 +387,6 @@ def _assay5_layer2adata(assay, layer):
 
     logging.info(f"Concatenating split layers: {layers}")
     adata = ad.concat(adatas, join="outer", fill_value=0)
-
-    del adatas
-    # fix order, it should also fail with any cells/features are missed (that should not happen)
-    all_cells = assay.get(["cells", "dimnames", 0]).value
-    all_features = assay.get(["features", "dimnames", 0]).value
-    adata = adata[all_cells, all_features].copy()
     return adata
 
 
