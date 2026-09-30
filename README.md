@@ -45,7 +45,7 @@ Please see the [tutorial](tutorials/tutorial.ipynb).
 2. `get([inx1,key2])` recursively subsets the object by the provided keys/indices. Returns Robj or None.
 Each `Robj` has values that are indexed by integers (shown as `+N` by `show` function) and slots/attributes that are indexed by keys (shown as `&/*<key>` by `show` function).
 
-All convertor functions (such as `as_data_frame`, `as_numpy`,`as_anndata`, `seurat2adata, `seurat2adata_spatial`) can take as input both file name and Robj, so if you are unsure about rds/qs2 file content you may first load it with `parse_rds`, browse and subset by `show` and `get` and then convert, it will save time on file reading.
+All convertor functions (such as `as_data_frame`, `as_numpy`,`as_anndata`, `seurat2adata`, `seurat2adata_spatial`) can take as input both, file name and Robj, so if you are unsure about rds/qs2 file content you may first load it with `parse_rds`, browse and subset by `show` and `get` and then convert. This approach can save time on file reading.
 
 Convertor functions named `as_` are designed to keep all content of rds/qs2 in python representation. Convertors like `seurat2adata` only keeps some data, as Seurat object cannot be mapped completely into anndata.
 
