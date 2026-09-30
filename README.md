@@ -32,7 +32,7 @@ adata = py8rds.seurat2adata("seurat.rds")
 robj = py8rds.parse_rds("data.rds")
 robj.show(level=2)
 # you can use converters on robj once you know what is in:
-metadata = py8rds.as_data_frame(robj.get(['meta.data']))
+metadata = py8rds.as_data_frame(robj.get(["meta.data"]))
 ```
 All functions also accept [qs2](https://github.com/qsbase/qs2) files saved by `qs2::qs_save` (file format is detected automatically). Files saved by `qs2::qd_save` (qdata format) or by the legacy `qs::qsave` are not supported.
 Please see the [tutorial](tutorials/tutorial.ipynb).
