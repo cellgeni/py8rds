@@ -1,6 +1,6 @@
 # 🐍 🍽️ RDS
 
-`py8rds` *(python ate RDS)* provides pure-Python deserialization of R `.rds` files, allowing you to load R data directly into Python without requiring an R installation.
+`py8rds` *(python ate RDS)* provides pure-Python deserialization of R `.rds` and `.qs2` files, allowing you to load R data directly into Python without requiring an R installation.
 
 
 ## Prerequisites
@@ -18,20 +18,36 @@ pip install git+https://github.com/cellgeni/py8rds.git
 
 ```python
 import py8rds
-df = py8rds.as_data_frame('data_frame.rds')
-adata = py8rds.as_anndata('seurat.rds')
-robj = py8rds.parse_rds('data.rds')
-robj.show()
+
+# to load data.frames save
+df = py8rds.as_data_frame("data_frame.rds")
+
+# to load dense/sparse named matrices; anndata allows to keep dimnames.
+mtx = py8rds.as_anndata("matrix.rds")
+
+# to read Seurat. Please note that it reads only one assay:layer (first assay and `counts` layer by default, see assay and layer parameters)
+adata = py8rds.seurat2adata("seurat.rds")
+
+# general function to read rds into python
+robj = py8rds.parse_rds("data.rds")
+robj.show(level=2)
+# you can use converters on robj once you know what is in:
+metadata = py8rds.as_data_frame(robj.get(["meta.data"]))
 ```
+All functions also accept [qs2](https://github.com/qsbase/qs2) files saved by `qs2::qs_save` (file format is detected automatically). Files saved by `qs2::qd_save` (qdata format) or by the legacy `qs::qsave` are not supported.
 Please see the [tutorial](tutorials/tutorial.ipynb).
 
 
 ## Details
 
-`parse_rds` is the base function that reads an RDS file into a Python `Robj`, which has a tree-like structure. `Robj` has two main methods:
+`parse_rds` is the base function that reads an RDS/qs2 file into a Python `Robj`, which has a tree-like structure. `Robj` has two main methods:
 1. `show(level=1)` shows the object structure to the specified level.
-2. `get([inx1,key2])` recursively subsets the object by the provided keys/indices.
+2. `get([inx1,key2])` recursively subsets the object by the provided keys/indices. Returns Robj or None.
 Each `Robj` has values that are indexed by integers (shown as `+N` by `show` function) and slots/attributes that are indexed by keys (shown as `&/*<key>` by `show` function).
+
+All convertor functions (such as `as_data_frame`, `as_numpy`,`as_anndata`, `seurat2adata, `seurat2adata_spatial`) can take as input both file name and Robj, so if you are unsure about rds/qs2 file content you may first load it with `parse_rds`, browse and subset by `show` and `get` and then convert, it will save time on file reading.
+
+Convertor functions named `as_` are designed to keep all content of rds/qs2 in python representation. Convertors like `seurat2adata` only keeps some data, as Seurat object cannot be mapped completely into anndata.
 
 
 ## Acknowledgements

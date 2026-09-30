@@ -21,9 +21,17 @@ data_frame <- data.frame (
   row.names = c('r1','r2','r3','r4')
 )
 saveRDS(data_frame,"data.frame_with_rownames.rds")
+qs2::qs_save(data_frame,"data.frame_with_rownames.qs2")
 rownames(data_frame) = NULL
 
 saveRDS(data_frame,"data.frame_without_rownames.rds")
+
+# qs2: multi-block file with byte-shuffled blocks
+set.seed(1)
+big_list = list(num = cumsum(rnorm(1e6)), int = sample.int(1e6, 1e6, TRUE), chr = paste0("s", sample(1e5, 2e5, TRUE)))
+saveRDS(big_list,"big_list.rds")
+qs2::qs_save(big_list,"big_list.qs2", shuffle = TRUE)
+qs2::qs_save(big_list,"big_list_noshuffle.qs2", shuffle = FALSE)
 
 # environment
 a = new.env()
@@ -35,6 +43,8 @@ saveRDS(a,'environment.rds')
 
 # Seurat  ########
 # with sketch
+# need Seurat >= 5.0.0
+stopifnot(packageVersion("Seurat") >= package_version("5.0.0"))
 library(Seurat)
 curl::curl_download('https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz',destfile = 'pbmc3k_filtered_gene_bc_matrices.tar.gz')
 system("tar -xzf pbmc3k_filtered_gene_bc_matrices.tar.gz")
@@ -68,3 +78,24 @@ saveRDS(obj,'seu_sketch.rds')
 rownames(obj@meta.data) = NULL
 
 saveRDS(obj,'seu_sketch_no_cellnames.rds')
+qs2::qs_save(obj,'seu_sketch_no_cellnames.qs2')
+
+# Assay5 with split layers
+set.seed(1)
+m <- matrix(rpois(20*12, 2), 20, 12, dimnames=list(paste0("g",1:20), paste0("c",1:12)))
+m <- as(m, "dgCMatrix")
+obj <- CreateSeuratObject(m)
+obj$batch <- rep(c("B","A","B","C"), 3)
+obj[["RNA"]] <- split(obj[["RNA"]], f = obj$batch)
+obj <- NormalizeData(obj)
+saveRDS(obj,'seu_split.rds')
+write.csv(as.matrix(LayerData(JoinLayers(obj), "data")), "seu_split_joined_data.csv")
+
+# split layers with different features
+obj <- CreateSeuratObject(CreateAssay5Object(counts = list(m[1:15, 1:6], m[6:20, 7:12])))
+saveRDS(obj,'seu_split_diff_features.rds')
+write.csv(as.matrix(LayerData(JoinLayers(obj), "counts")), "seu_split_diff_features_joined_counts.csv")
+
+# layers sharing cells, they are not split layers and cannot be concatenated
+obj <- CreateSeuratObject(CreateAssay5Object(counts = list(raw = m, filtered = m[1:15, 1:6])))
+saveRDS(obj,'seu_overlapping_layers.rds')

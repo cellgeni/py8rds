@@ -161,4 +161,15 @@ cython_debug/
 
 
 .DS_Store
+local_work/
 test_rds
+*.rds
+*.RDS
+*.Rds
+*.qs2
+*.csv
+
+# add rds,csv and qs2 in test
+!tests/**/*.rds
+!tests/**/*.csv
+!tests/**/*.qs2

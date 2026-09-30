@@ -1,9 +1,7 @@
 import os
-import shutil
-import tempfile
 import unittest
-import subprocess
 
+import numpy as np
 import pandas as pd
 import py8rds
 
@@ -13,57 +11,39 @@ logging.disable(logging.CRITICAL)
 
 
 class TestRdsParser(unittest.TestCase):
+    TEST_DIR = os.path.dirname(os.path.realpath(__file__))
     EXPECTED_RDS_FILES = {
         "atomic_vector_bool.rds",
         "atomic_vector_char.rds",
         "atomic_vector_num.rds",
+        "big_list.rds",
         "data.frame_with_rownames.rds",
         "data.frame_without_rownames.rds",
         "environment.rds",
         "regular_sequence.rds",
         "seu_sketch.rds",
         "seu_sketch_no_cellnames.rds",
+        "seu_split.rds",
+        "seu_split_diff_features.rds",
+        "seu_overlapping_layers.rds",
     }
     SEURAT_RDS_FILES = {"seu_sketch.rds", "seu_sketch_no_cellnames.rds"}
-
-    @classmethod
-    def setUpClass(cls):
-        # Create a temporary directory and generate all test fixtures once.
-        cls.test_dir = tempfile.mkdtemp()
-        create_test_data_script_src = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)), "create_test_data.R"
-        )
-        shutil.copy(
-            create_test_data_script_src,
-            os.path.join(cls.test_dir, "create_test_data.R"),
-        )
-        process = subprocess.run(
-            ["Rscript", "create_test_data.R"],
-            cwd=cls.test_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if process.returncode != 0:
-            raise Exception(
-                f"Fail to setup tests. create_test_data.R returned code '{process.returncode}'\n"
-                f"STDOUT: {process.stdout}\n"
-                f"STDERR: {process.stderr}"
-            )
-
-    @classmethod
-    def tearDownClass(cls):
-        # Remove the directory after all tests in this class.
-        shutil.rmtree(cls.test_dir)
+    # qs2 file -> rds file with the same object
+    QS2_FILES = {
+        "data.frame_with_rownames.qs2": "data.frame_with_rownames.rds",
+        "big_list.qs2": "big_list.rds",
+        "big_list_noshuffle.qs2": "big_list.rds",
+        "seu_sketch_no_cellnames.qs2": "seu_sketch_no_cellnames.rds",
+    }
 
     def _path(self, filename):
-        return os.path.join(self.test_dir, filename)
+        return os.path.join(self.TEST_DIR, filename)
 
-    def test_expected_generated_files(self):
-        generated = {f for f in os.listdir(self.test_dir) if f.endswith(".rds")}
-        self.assertSetEqual(generated, self.EXPECTED_RDS_FILES)
+    def test_expected_fixture_files(self):
+        fixtures = {f for f in os.listdir(self.TEST_DIR) if f.endswith(".rds")}
+        self.assertSetEqual(fixtures, self.EXPECTED_RDS_FILES)
 
-    def test_all_generated_files_are_readable(self):
+    def test_all_fixture_files_are_readable(self):
         for filename in sorted(self.EXPECTED_RDS_FILES):
             with self.subTest(filename=filename):
                 result = py8rds.parse_rds(self._path(filename))
@@ -151,6 +131,42 @@ class TestRdsParser(unittest.TestCase):
         environment = py8rds.parse_rds(self._path("environment.rds"))
         self.assertIsNotNone(environment)
 
+    def assertRobjEqual(self, a, b, path="root"):
+        self.assertIs(type(a), type(b), path)
+        if isinstance(a, py8rds.Robj):
+            self.assertRobjEqual(a.value, b.value, path + ".value")
+            self.assertRobjEqual(a.attributes, b.attributes, path + ".attributes")
+        elif isinstance(a, (list, tuple)):
+            self.assertEqual(len(a), len(b), path)
+            for i, (x, y) in enumerate(zip(a, b)):
+                self.assertRobjEqual(x, y, f"{path}[{i}]")
+        elif isinstance(a, np.ndarray):
+            self.assertEqual((a.dtype, a.shape), (b.dtype, b.shape), path)
+            if a.dtype.kind in "fc":
+                self.assertTrue(np.array_equal(a, b, equal_nan=True), path)
+            else:
+                self.assertListEqual(a.tolist(), b.tolist(), path)
+        elif a != b and not (a != a and b != b):  # NaN == NaN
+            self.fail(f"{path}: {a!r} != {b!r}")
+
+    def test_qs2_equals_rds(self):
+        for qs2_file, rds_file in sorted(self.QS2_FILES.items()):
+            with self.subTest(filename=qs2_file):
+                self.assertRobjEqual(
+                    py8rds.parse_rds(self._path(rds_file)),
+                    py8rds.parse_rds(self._path(qs2_file)),
+                )
+
+    def test_qs2_data_frame_and_seurat(self):
+        pd.testing.assert_frame_equal(
+            py8rds.as_data_frame(self._path("data.frame_with_rownames.rds")),
+            py8rds.as_data_frame(self._path("data.frame_with_rownames.qs2")),
+        )
+        adata = py8rds.seurat2adata(
+            self._path("seu_sketch_no_cellnames.qs2"), assay="RNA"
+        )
+        self.assertEqual(adata.shape, (2700, 13714))
+
     def test_seurat2adata_rna_assay_by_name_and_index(self):
         for filename in sorted(self.SEURAT_RDS_FILES):
             with self.subTest(filename=filename):
@@ -195,6 +211,39 @@ class TestRdsParser(unittest.TestCase):
                 self.assertIn("pca", adata_by_name.obsm)
                 self.assertEqual(adata_by_name.obsm["pca"].shape[0], 500)
                 self.assertGreater(adata_by_name.obsm["pca"].shape[1], 0)
+
+    def test_seurat2adata_split_layers_equal_join_layers(self):
+        # file -> (layer, csv with the layer after JoinLayers)
+        cases = {
+            "seu_split.rds": ("data", "seu_split_joined_data.csv"),
+            "seu_split_diff_features.rds": (
+                "counts",
+                "seu_split_diff_features_joined_counts.csv",
+            ),
+        }
+        for filename, (layer, joined_csv) in sorted(cases.items()):
+            with self.subTest(filename=filename):
+                adata = py8rds.seurat2adata(self._path(filename), layer=layer)
+                joined = pd.read_csv(self._path(joined_csv), index_col=0).T
+                self.assertCountEqual(adata.obs_names.tolist(), joined.index.tolist())
+                self.assertCountEqual(adata.var_names.tolist(), joined.columns.tolist())
+                joined = joined.reindex(
+                    index=adata.obs_names, columns=adata.var_names
+                )
+                self.assertTrue(np.allclose(adata.X.toarray(), joined.values))
+
+    def test_seurat2adata_single_split_layer(self):
+        adata = py8rds.seurat2adata(self._path("seu_split.rds"), layer="counts.A")
+        self.assertListEqual(adata.obs_names.tolist(), ["c2", "c6", "c10"])
+        self.assertListEqual(adata.obs["batch"].tolist(), ["A", "A", "A"])
+        self.assertEqual(adata.shape[1], 20)
+
+    def test_seurat2adata_overlapping_layers_are_not_concatenated(self):
+        path = self._path("seu_overlapping_layers.rds")
+        with self.assertRaisesRegex(ValueError, "share cells"):
+            py8rds.seurat2adata(path, layer="counts")
+        adata = py8rds.seurat2adata(path, layer="counts.filtered")
+        self.assertEqual(adata.shape, (6, 15))
 
 
 if __name__ == "__main__":
