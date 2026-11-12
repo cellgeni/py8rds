@@ -129,6 +129,9 @@ def as_anndata(robj):
 
     if isinstance(robj, str):
         robj = parse_rds(robj)
+    cl = robj.getClass()
+    if cl not in ["dgCMatrix", "REALSXP"]:
+        raise ValueError(f"Cannot convert Robj of class {cl} to AnnData.")
     X = as_numpy(robj).T
     adata = ad.AnnData(X=X)
     dimnames = robj.get("dimnames")
