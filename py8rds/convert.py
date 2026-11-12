@@ -302,9 +302,15 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
     for i, name in enumerate(img_names):
         img_obj = images.get(i)
         img = as_numpy(img_obj.get("image"))
-        coords = as_data_frame(img_obj.get("coordinates"))
-        spatial_coords = pd.concat([spatial_coords, coords], axis=0)
-
+        if img_obj.get("coordinates") is not None:
+            coords = as_data_frame(img_obj.get("coordinates"))
+            spatial_coords = pd.concat([spatial_coords, coords], axis=0)
+        # visiumHD
+        elif img_obj.get(["boundaries", 0, "coords"]) is not None: 
+            coords = pd.DataFrame(as_numpy(img_obj.get(["boundaries", 0, "coords"])))
+            coords.columns = ["imagecol", "imagerow"]
+            coords.index = img_obj.get(["boundaries", 0, "cells"]).value
+            spatial_coords = pd.concat([spatial_coords, coords], axis=0)
         scalefactors = as_dict(img_obj.get("scale.factors"))
         scalefactors = {
             "fiducial_diameter_fullres": scalefactors["fiducial"][0],
@@ -320,6 +326,7 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
 
     if spatial_uns:
         adata.uns["spatial"] = spatial_uns
+
     adata.obsm["spatial"] = spatial_coords.loc[
         adata.obs_names, ["imagecol", "imagerow"]
     ].to_numpy()

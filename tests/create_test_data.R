@@ -111,3 +111,15 @@ seu[["full"]] <- CreateDimReducObject(embeddings = full, key = "FULL_", assay = 
 part <- matrix(rnorm(6 * 2), 6, 2, dimnames = list(Cells(seu)[1:6], c("PART_1", "PART_2")))
 seu[["part"]] <- CreateDimReducObject(embeddings = part, key = "PART_", assay = "RNA")
 saveRDS(seu, "partial_reduction.rds")
+
+
+# VisiumHD #####
+dir.create('visium_hd')
+system("curl -o visium_hd/Visium_HD_Tiny_3prime_Dataset_outs.zip https://cf.10xgenomics.com/samples/spatial-exp/4.0.1/Visium_HD_Tiny_3prime_Dataset/Visium_HD_Tiny_3prime_Dataset_outs.zip")
+system("unzip visium_hd/Visium_HD_Tiny_3prime_Dataset_outs.zip -d visium_hd/")
+library(Seurat)
+sp = Load10X_Spatial("visium_hd/binned_outputs/square_016um/")
+saveRDS(sp, "visium_hd.rds")
+system("rm -r visium_hd")
+
+
