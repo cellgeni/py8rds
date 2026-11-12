@@ -104,6 +104,7 @@ def as_numpy(robj):
         return _dgCMatrix2numpy(robj)
     if cl == "REALSXP":
         return _array2numpy(robj)
+    raise ValueError(f"Cannot convert Robj of class {cl} to NumPy array.")
 
 
 def as_anndata(robj):
