@@ -99,3 +99,27 @@ write.csv(as.matrix(LayerData(JoinLayers(obj), "counts")), "seu_split_diff_featu
 # layers sharing cells, they are not split layers and cannot be concatenated
 obj <- CreateSeuratObject(CreateAssay5Object(counts = list(raw = m, filtered = m[1:15, 1:6])))
 saveRDS(obj,'seu_overlapping_layers.rds')
+
+# issue 6; partial reductions
+library(SeuratObject)
+set.seed(1)
+counts <- Matrix::rsparsematrix(20, 10, 0.3, rand.x = function(n) rpois(n, 5) + 1)
+dimnames(counts) <- list(paste0("g", 1:20), paste0("c", 1:10))
+seu <- CreateSeuratObject(counts = counts)
+full <- matrix(rnorm(10 * 2), 10, 2, dimnames = list(Cells(seu), c("FULL_1", "FULL_2")))
+seu[["full"]] <- CreateDimReducObject(embeddings = full, key = "FULL_", assay = "RNA")
+part <- matrix(rnorm(6 * 2), 6, 2, dimnames = list(Cells(seu)[1:6], c("PART_1", "PART_2")))
+seu[["part"]] <- CreateDimReducObject(embeddings = part, key = "PART_", assay = "RNA")
+saveRDS(seu, "partial_reduction.rds")
+
+
+# VisiumHD #####
+dir.create('visium_hd')
+system("curl -o visium_hd/Visium_HD_Tiny_3prime_Dataset_outs.zip https://cf.10xgenomics.com/samples/spatial-exp/4.0.1/Visium_HD_Tiny_3prime_Dataset/Visium_HD_Tiny_3prime_Dataset_outs.zip")
+system("unzip visium_hd/Visium_HD_Tiny_3prime_Dataset_outs.zip -d visium_hd/")
+library(Seurat)
+sp = Load10X_Spatial("visium_hd/binned_outputs/square_016um/")
+saveRDS(sp, "visium_hd.rds")
+system("rm -r visium_hd")
+
+

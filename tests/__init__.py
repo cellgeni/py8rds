@@ -26,6 +26,8 @@ class TestRdsParser(unittest.TestCase):
         "seu_split.rds",
         "seu_split_diff_features.rds",
         "seu_overlapping_layers.rds",
+        "partial_reduction.rds",
+        "visium_hd.rds",
     }
     SEURAT_RDS_FILES = {"seu_sketch.rds", "seu_sketch_no_cellnames.rds"}
     # qs2 file -> rds file with the same object
@@ -227,9 +229,7 @@ class TestRdsParser(unittest.TestCase):
                 joined = pd.read_csv(self._path(joined_csv), index_col=0).T
                 self.assertCountEqual(adata.obs_names.tolist(), joined.index.tolist())
                 self.assertCountEqual(adata.var_names.tolist(), joined.columns.tolist())
-                joined = joined.reindex(
-                    index=adata.obs_names, columns=adata.var_names
-                )
+                joined = joined.reindex(index=adata.obs_names, columns=adata.var_names)
                 self.assertTrue(np.allclose(adata.X.toarray(), joined.values))
 
     def test_seurat2adata_single_split_layer(self):
@@ -244,6 +244,21 @@ class TestRdsParser(unittest.TestCase):
             py8rds.seurat2adata(path, layer="counts")
         adata = py8rds.seurat2adata(path, layer="counts.filtered")
         self.assertEqual(adata.shape, (6, 15))
+
+    def test_seurat_partial_reduction(self):
+        path = self._path("partial_reduction.rds")
+        adata = py8rds.seurat2adata(path)
+        self.assertIn("part", adata.obsm)
+        self.assertIn("full", adata.obsm)
+        self.assertEqual(adata.obsm["part"].shape, (10, 2))
+        self.assertEqual(adata.obsm["full"].shape, (10, 2))
+
+    def test_visium_hd(self):
+        path = self._path("visium_hd.rds")
+        adata = py8rds.seurat2adata_spatial(path)
+        self.assertEqual(adata.shape, (5262, 32285))
+        self.assertIn("spatial", adata.obsm)
+        self.assertIn("spatial", adata.uns)
 
 
 if __name__ == "__main__":

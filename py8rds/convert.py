@@ -59,6 +59,8 @@ def as_data_frame(robj):
         cl = val.get("class")
         if (cl is not None) and "factor" in cl.value:
             val = factor2array(val)
+        elif val.value.dtype == "bool":
+            val = pd.arrays.BooleanArray(val.value.data, np.ma.getmaskarray(val.value))
         else:
             val = val.value
         cols[names[i]] = val
@@ -104,6 +106,7 @@ def as_numpy(robj):
         return _dgCMatrix2numpy(robj)
     if cl == "REALSXP":
         return _array2numpy(robj)
+    raise ValueError(f"Cannot convert Robj of class {cl} to NumPy array.")
 
 
 def as_anndata(robj):
@@ -128,6 +131,14 @@ def as_anndata(robj):
 
     if isinstance(robj, str):
         robj = parse_rds(robj)
+    cl = robj.getClass()
+    if cl not in ["dgCMatrix", "REALSXP"]:
+        if cl == "Seurat":
+            raise ValueError(
+                "Cannot convert Seurat Robj to AnnData, as there is no direct mapping. Use lossy py8rds.seurat2adata() instead."
+            )
+        else:
+            raise ValueError(f"Cannot convert Robj of class {cl} to AnnData.")
     X = as_numpy(robj).T
     adata = ad.AnnData(X=X)
     dimnames = robj.get("dimnames")
@@ -207,7 +218,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
             )
         var = var.loc[adata.var_names, :]
 
-    #try to keep dimnames if they are missed in obs. There are some weird cases...
+    # try to keep dimnames if they are missed in obs. There are some weird cases...
     if is_default_index(obs) and (obs.shape[0] == adata.shape[0]):
         obs.index = adata.obs_names
 
@@ -216,14 +227,16 @@ def seurat2adata(robj, assay=0, layer="counts"):
         obs_names = robj.get(["active.ident", "names"]).value
         if obs.shape[0] == len(obs_names):
             obs.index = obs_names
-    
+
     # make sure obs are the same
     if adata.shape[0] != obs.shape[0]:
         if is_default_index(obs) or is_default_index(adata.obs):
-            raise ValueError("Incompatible shapes between AnnData and meta.data, and at least one of them has default index. Cannot subset.")
+            raise ValueError(
+                "Incompatible shapes between AnnData and meta.data, and at least one of them has default index. Cannot subset."
+            )
         logging.warning(
             f"Number of cells in layer '{layer}' ({adata.shape[0]}) does not match number of cells in meta.data ({obs.shape[0]}). Subsetting meta.data to match layer."
-    )
+        )
     obs = obs.loc[adata.obs_names, :]
 
     adata.obs = obs
@@ -242,7 +255,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
                 if cell_names is not None:
                     embedding = (
                         pd.DataFrame(embedding, index=cell_names.value)
-                        .loc[adata.obs_names]
+                        .reindex(adata.obs_names)
                         .to_numpy()
                     )
                 if embedding.shape[0] != adata.shape[0]:
@@ -289,9 +302,15 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
     for i, name in enumerate(img_names):
         img_obj = images.get(i)
         img = as_numpy(img_obj.get("image"))
-        coords = as_data_frame(img_obj.get("coordinates"))
-        spatial_coords = pd.concat([spatial_coords, coords], axis=0)
-
+        if img_obj.get("coordinates") is not None:
+            coords = as_data_frame(img_obj.get("coordinates"))
+            spatial_coords = pd.concat([spatial_coords, coords], axis=0)
+        # visiumHD
+        elif img_obj.get(["boundaries", 0, "coords"]) is not None: 
+            coords = pd.DataFrame(as_numpy(img_obj.get(["boundaries", 0, "coords"])))
+            coords.columns = ["imagecol", "imagerow"]
+            coords.index = img_obj.get(["boundaries", 0, "cells"]).value
+            spatial_coords = pd.concat([spatial_coords, coords], axis=0)
         scalefactors = as_dict(img_obj.get("scale.factors"))
         scalefactors = {
             "fiducial_diameter_fullres": scalefactors["fiducial"][0],
@@ -307,6 +326,7 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
 
     if spatial_uns:
         adata.uns["spatial"] = spatial_uns
+
     adata.obsm["spatial"] = spatial_coords.loc[
         adata.obs_names, ["imagecol", "imagerow"]
     ].to_numpy()
