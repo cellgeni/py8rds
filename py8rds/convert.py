@@ -59,6 +59,8 @@ def as_data_frame(robj):
         cl = val.get("class")
         if (cl is not None) and "factor" in cl.value:
             val = factor2array(val)
+        elif val.value.dtype == "bool":
+            val = pd.arrays.BooleanArray(val.value.data, np.ma.getmaskarray(val.value))
         else:
             val = val.value
         cols[names[i]] = val
@@ -131,7 +133,10 @@ def as_anndata(robj):
         robj = parse_rds(robj)
     cl = robj.getClass()
     if cl not in ["dgCMatrix", "REALSXP"]:
-        raise ValueError(f"Cannot convert Robj of class {cl} to AnnData.")
+        if cl == "Seurat":
+            raise ValueError("Cannot convert Seurat Robj to AnnData, as there is no direct mapping. Use lossy py8rds.seurat2adata() instead.")
+        else:
+            raise ValueError(f"Cannot convert Robj of class {cl} to AnnData.")
     X = as_numpy(robj).T
     adata = ad.AnnData(X=X)
     dimnames = robj.get("dimnames")
@@ -256,7 +261,6 @@ def seurat2adata(robj, assay=0, layer="counts"):
                 adata.obsm[rdims_names[i]] = embedding
 
     return adata
-
 
 def seurat2adata_spatial(robj, assay=0, layer="counts"):
     """
