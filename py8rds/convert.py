@@ -134,7 +134,9 @@ def as_anndata(robj):
     cl = robj.getClass()
     if cl not in ["dgCMatrix", "REALSXP"]:
         if cl == "Seurat":
-            raise ValueError("Cannot convert Seurat Robj to AnnData, as there is no direct mapping. Use lossy py8rds.seurat2adata() instead.")
+            raise ValueError(
+                "Cannot convert Seurat Robj to AnnData, as there is no direct mapping. Use lossy py8rds.seurat2adata() instead."
+            )
         else:
             raise ValueError(f"Cannot convert Robj of class {cl} to AnnData.")
     X = as_numpy(robj).T
@@ -216,7 +218,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
             )
         var = var.loc[adata.var_names, :]
 
-    #try to keep dimnames if they are missed in obs. There are some weird cases...
+    # try to keep dimnames if they are missed in obs. There are some weird cases...
     if is_default_index(obs) and (obs.shape[0] == adata.shape[0]):
         obs.index = adata.obs_names
 
@@ -225,14 +227,16 @@ def seurat2adata(robj, assay=0, layer="counts"):
         obs_names = robj.get(["active.ident", "names"]).value
         if obs.shape[0] == len(obs_names):
             obs.index = obs_names
-    
+
     # make sure obs are the same
     if adata.shape[0] != obs.shape[0]:
         if is_default_index(obs) or is_default_index(adata.obs):
-            raise ValueError("Incompatible shapes between AnnData and meta.data, and at least one of them has default index. Cannot subset.")
+            raise ValueError(
+                "Incompatible shapes between AnnData and meta.data, and at least one of them has default index. Cannot subset."
+            )
         logging.warning(
             f"Number of cells in layer '{layer}' ({adata.shape[0]}) does not match number of cells in meta.data ({obs.shape[0]}). Subsetting meta.data to match layer."
-    )
+        )
     obs = obs.loc[adata.obs_names, :]
 
     adata.obs = obs
@@ -251,7 +255,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
                 if cell_names is not None:
                     embedding = (
                         pd.DataFrame(embedding, index=cell_names.value)
-                        .loc[adata.obs_names]
+                        .reindex(adata.obs_names)
                         .to_numpy()
                     )
                 if embedding.shape[0] != adata.shape[0]:
@@ -261,6 +265,7 @@ def seurat2adata(robj, assay=0, layer="counts"):
                 adata.obsm[rdims_names[i]] = embedding
 
     return adata
+
 
 def seurat2adata_spatial(robj, assay=0, layer="counts"):
     """
