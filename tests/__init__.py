@@ -75,9 +75,10 @@ class TestRdsParser(unittest.TestCase):
 
     def test_data_frames(self):
         with_rownames = py8rds.as_data_frame(self._path("data.frame_with_rownames.rds"))
-        self.assertEqual(with_rownames.shape, (4, 4))
+        self.assertEqual(with_rownames.shape, (4, 5))
         self.assertListEqual(
-            with_rownames.columns.tolist(), ["CharVec", "NumVec", "BoolVec", "Factor"]
+            with_rownames.columns.tolist(),
+            ["CharVec", "NumVec", "BoolVec", "Factor", "IntVec"],
         )
         self.assertListEqual(with_rownames.index.tolist(), ["r1", "r2", "r3", "r4"])
         self.assertTrue(pd.isna(with_rownames.loc["r1", "CharVec"]))
@@ -103,10 +104,10 @@ class TestRdsParser(unittest.TestCase):
         without_rownames = py8rds.as_data_frame(
             self._path("data.frame_without_rownames.rds")
         )
-        self.assertEqual(without_rownames.shape, (4, 4))
+        self.assertEqual(without_rownames.shape, (4, 5))
         self.assertListEqual(
             without_rownames.columns.tolist(),
-            ["CharVec", "NumVec", "BoolVec", "Factor"],
+            ["CharVec", "NumVec", "BoolVec", "Factor", "IntVec"],
         )
         self.assertListEqual(without_rownames.index.tolist(), [0, 1, 2, 3])
         self.assertTrue(pd.isna(without_rownames.loc[0, "CharVec"]))

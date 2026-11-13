@@ -59,7 +59,8 @@ def as_data_frame(robj):
         cl = val.get("class")
         if (cl is not None) and "factor" in cl.value:
             val = factor2array(val)
-        elif val.value.dtype == "bool":
+        # cast BoolVec to pd boolean
+        elif getattr(val.value, "dtype", None) == "bool":
             val = pd.arrays.BooleanArray(val.value.data, np.ma.getmaskarray(val.value))
         else:
             val = val.value
@@ -75,9 +76,12 @@ def as_data_frame(robj):
 
     # set int NAs, cannot do in before as numpy int32 doesn't support NAs
     int32_cols = r.select_dtypes(include=["int32"]).columns
-
-    r[int32_cols] = r[int32_cols].astype("Int32").replace(INT_NA, pd.NA)
-
+    # convert to float32 if they have NAs, keep int32 otherwise
+    for c in int32_cols:
+        if (r[c] == INT_NA).any():
+            f = r[c] == INT_NA
+            r[c] = r[c].astype("float32")
+            r.loc[f, c] = np.nan
     return r
 
 
@@ -306,7 +310,7 @@ def seurat2adata_spatial(robj, assay=0, layer="counts"):
             coords = as_data_frame(img_obj.get("coordinates"))
             spatial_coords = pd.concat([spatial_coords, coords], axis=0)
         # visiumHD
-        elif img_obj.get(["boundaries", 0, "coords"]) is not None: 
+        elif img_obj.get(["boundaries", 0, "coords"]) is not None:
             coords = pd.DataFrame(as_numpy(img_obj.get(["boundaries", 0, "coords"])))
             coords.columns = ["imagecol", "imagerow"]
             coords.index = img_obj.get(["boundaries", 0, "cells"]).value
