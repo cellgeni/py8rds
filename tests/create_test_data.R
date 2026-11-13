@@ -18,6 +18,7 @@ data_frame <- data.frame (
   NumVec  = c( 1,     2,    3  , NA),
   BoolVec = c(TRUE, FALSE, NA, TRUE),
   Factor  = factor(c('A',NA,'B','C')),
+  IntVec  = c( 11L,     22L,    33L  , NA),
   row.names = c('r1','r2','r3','r4')
 )
 saveRDS(data_frame,"data.frame_with_rownames.rds")
