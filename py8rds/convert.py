@@ -76,11 +76,11 @@ def as_data_frame(robj):
 
     # set int NAs, cannot do in before as numpy int32 doesn't support NAs
     int32_cols = r.select_dtypes(include=["int32"]).columns
-    # convert to float32 if they have NAs, keep int32 otherwise
+    # convert to float64 if they have NAs, keep int32 otherwise
     for c in int32_cols:
         if (r[c] == INT_NA).any():
             f = r[c] == INT_NA
-            r[c] = r[c].astype("float32")
+            r[c] = r[c].astype("float64")
             r.loc[f, c] = np.nan
     return r
 
